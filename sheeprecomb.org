@@ -1,0 +1,2233 @@
+#+OPTIONS: ':nil *:t -:t ::t <:t H:3 \n:nil ^:t arch:headline
+#+OPTIONS: author:t broken-links:nil c:nil creator:nil
+#+OPTIONS: d:(not "LOGBOOK") date:t e:t email:nil f:t inline:t num:t
+#+OPTIONS: p:nil pri:nil prop:nil stat:t tags:t tasks:t tex:t
+#+OPTIONS: timestamp:t title:t toc:t todo:t |:t
+#+TITLE: Variation in recombination rate and its genetic determinism in sheep (Ovis Aried) from combining multiple genome-wide datasets
+#+AUTHOR:  Morgane Petit, Carole Moreno, Bertrand Servin
+#+EMAIL: bertrand.servin@inra.fr
+#+LANGUAGE: en
+#+SELECT_TAGS: export
+#+EXCLUDE_TAGS: noexport
+#+CREATOR: Emacs 24.5.1 (Org mode 9.0.3)
+#+LATEX_CLASS: article
+#+LATEX_CLASS_OPTIONS: [12pt,a4paper]
+#+LATEX_HEADER: \usepackage[top=1in,bottom=1in,left=0.8in,right=1in]{geometry}
+#+LATEX_HEADER: \usepackage{float,fontspec,unicode,hyperref}
+#+LATEX_HEADER_EXTRA:\setmainfont{TeX Gyre Termes}
+#+LATEX_HEADER_EXTRA: \renewcommand{\thefigure}{SM\arabic{figure}}
+#+LATEX_HEADER_EXTRA: \renewcommand{\thetable}{SM\arabic{table}}
+#+DESCRIPTION:
+#+KEYWORDS:
+#+SUBTITLE: Supporting Material: Methods and Analyses
+#+LATEX_COMPILER: xelatex
+#+DATE: June, 2017
+
+* Introduction
+
+This document is an [[http://orgmode.org/][=org-mode=]] file that contains all necessary
+information enabling to reproduce the results presented in the paper 
+ /Fine scale structure and genetic determinism of recombination rate
+in sheep from combining multiple genome-wide datasets/ by Petit et
+al. (2017). It can be used in =emacs= to actually run the analyses, and
+can be exported as a pdf/rtf ... file for documentation. 
+
+** Data Sources
+
+This study exploits genetic data from two sources: [[https://doi.org/10.5281/zenodo.267927][a pedigree dataset
+from the Lacaune Sheep population genotyped with a medium density SNP
+chip]] and [[https://www.zenodo.org/record/237116][a population dataset of 70 Lacaune males genotyped with a
+high density SNP chip]] . 
+
+The relevant files can be downloaded as follows:
+#+BEGIN_SRC sh :tangle "code/run_scripts.sh"
+  mkdir -p data/population/HDpanel
+  mkdir -p data/family/Lacaunes
+  ## Get Panel data
+  baseurl=https://www.zenodo.org/record/237116/files
+  wget -P data/population/HDpanel $baseurl/frenchsheep_HD.bim
+  wget -P data/population/HDpanel $baseurl/frenchsheep_HD.bed
+  wget -P data/population/HDpanel $baseurl/frenchsheep_HD.fam
+  ## Get Pedigree data
+  baseurl=https://www.zenodo.org/record/804264/files
+  wget -P data/family/Lacaunes $baseurl/lacaune_genotypes.fam
+  wget -P data/family/Lacaunes $baseurl/lacaune_genotypes.bed
+  wget -P data/family/Lacaunes $baseurl/lacaune_genotypes.bim
+#+END_SRC
+
+
+** Prerequisites
+
+Required packages, software and libraries to run the analysis
+
++ =R= environment
+  - =qvalue=
+  - =MASS=
+  - =zoo=
+  - =ashr=
+  - =Hmisc=
+  - =lme4=
+  - =mclust=
+  - =reshape2=
++ =python= version 2.7
+  - =numpy / scipy / matplotlib=
++ Additional Software:
+  - To recreate intermediate results: [[http://stephenslab.uchicago.edu/software.html][PHASE]], [[http://www.giga.ulg.ac.be/cms/c_20703/en/unit-of-animal-genomics-software][LINKPHASE]], [[http://nce.ads.uga.edu/wiki/doku.php][blupf90]], [[http://www.haplotype.org/bimbam.html][bimbam]]
+  - gemma : http://www.xzlab.org/software.html
+
+ 
+** Structure
+
+The main directory contains (i) intermediate files and scripts to
+reproduce the analysis and (ii)  results from the paper //Fine
+scale structure and genetic determinism of recombination rate in sheep
+from combining multiple genome-wide datasets// by Petit et
+al. (2017). The directory structure is as follows:
++ =data/= :: Supplemental data for the analyses
+  - =data/family= :: Contains intermediate results from =LINKPHASE= and =AIREML= analysis
+  - =data/population= :: Contains intermediate results from =PHASE=
+  - =data/genome= :: Information from OAR3.1 genome assembly 
+  - =data/gwas= :: Contains intermediate results to run GWAS on GRR
+                   (imputed genotypes and input files for  [[http://www.xzlab.org/software.html][=gemma=]]).
+  - =data/Soay= :: Data from Johnston et al. (2016) on Soay Sheep population.
++ =results/= :: Results from the analyses
++ =code/= ::  scripts used to produce =results=. Some of these scripts
+             are extracted (technically /tangled/) from this document,
+             while others need to be run from the command line, as
+             specified below.
++ =figures/= :: figures produced by the analyses
+
+
+** Base analyses
+The results presented in this document exploit outputs from initial
+analyses based on publicly available data (see [[Data Sources]]). Because
+these analyses require a substantial amount of computing time, we
+provide in the =data= directory the relevant output files. However the
+following scripts can be used to reproduce these files:
+
++ =code/linkphase.sh= :: converts plink files to input files for
+     LINKPHASE, runs LINKPHASE on each chromosome, identifies and
+     corrects for double-crossovers (see =code/doubleco.R=). Creates
+     output files in =data/family/linkphase.in= directory.
++ =code/PHASE.sh= ::  extract Lacaune individuals from French sheep HD
+     panel data, removing individuals that are present in the
+     cohort. Converts plink file to PHASE input files (using plink
+     itself and =code/fph2ph.py=). An example is included on how to
+     run PHASE on a genome region to get posterior distribution
+     samples of historical recombination rates.
++ =code/selectFIDs.R= :: R script to select FIDs as detailed in the
+     manuscript. Creates the =data/family/FIDs.txt= file.
+
+
+* Results
+** High-Resolution Recombination Maps
+*** Meiotic recombination maps
+**** Constructing Recombination maps
+
+The construction of recombination maps from family data is done using
+the =python= script =code/family_map.py=. This script uses the output
+from LINKPHASE (in the =data/family/LINKPHASE/= directory) that
+contains crossover boundaries and run the estimation procedure
+described in Petit et al. (2017).
+
+#+BEGIN_SRC sh :tangle "code/run_scripts.sh" 
+python code/family_map.py
+#+END_SRC
+
+This produces recombination maps in the =results/family/= directory,
+for windows of one megabases and all intervals of the SNP array. The
+result of prior calibration using the Kadri et al. approach for
+initial $c_j$ estimates is provided in Figure [[fig:priorcj]]. It also
+produces a file in the =results/combined/= directory that contains,
+for each one megabase window, a sample of 20 values from the posterior
+distribution of $c_j$. This is used later for the comparison with
+population-based recombination maps.
+
+#+CAPTION: Calibration of the prior distribution of c_j (cM/Mb)
+#+NAME: fig:priorcj
+#+ATTR_LATEX: :width 0.5\textwidth :placement [H]
+[[file:figures/Prior_cj.pdf]]
+
+We then produce a representation of recombination maps on each
+autosome,  the resulting plots are given in file
+=figures/recombination_map.pdf=. As an illustration,
+recombination maps for chromosome 24 are shown on Figure [[fig:chr24map]].
+
+#+header: :width 10 :height 7 :units in :res 300 
+#+BEGIN_SRC R :tangle "code/family_rec_map.R" :session familyrecmap  :results output graphics :file figures/chr24_recmap.png :exports results 
+
+  dat.1m=read.table('results/family/1Mb_map.txt',h=T,fill=NA)
+  dat.snp=read.table('results/family/SNP_array_map.txt',h=T,fill=NA)
+  pdf(file='figures/recombination_map.pdf',w=14,h=12)
+  for (ichr in 1:26) {
+
+      thechr=dat.snp[ dat.snp$chr==ichr,]
+      thechr$mids=apply(thechr[,c(2,3)],1,mean)
+      thechr.1m=dat.1m[ dat.1m$chr==ichr,]
+      thechr.1m$mids=apply(thechr.1m[,c(2,3)],1,mean)
+
+      for (xl in seq(0,max(thechr$left),100e6) ) {
+          xr=xl+100e6
+
+          par(mfrow=c(2,1))
+          ## 1Mb map
+          mychr=thechr.1m[thechr.1m$left>xl & thechr.1m$left<xr,]
+          if (dim(mychr)[1]==0) {
+              next
+          }
+          xx=mychr$left
+          xx=rep(xx,each=2)
+          xx=xx[-1]
+          yy.q5=mychr$q5_cj
+          yy.q5=rep(yy.q5,each=2)
+          yy.q5=yy.q5[-length(yy.q5)]
+          yy.q95=mychr$q95_cj
+          yy.q95=rep(yy.q95,each=2)
+          yy.q95=yy.q95[-length(yy.q95)]
+
+          plot(mychr$mids,mychr$m_cj,pch=16,type='n',ylim=c(0,max(dat.1m$q95_cj)),
+               main=paste('Chromosome',ichr,'1Mb Windows'),axes=F,xlim=c(xl,xr),
+               xlab='Position (Mbp)',ylab='Recombination Rate (cM/Mb)')
+          axis(2)
+          axis(1,at=seq(0,max(mychr$right),10e6),
+               label=round(1e-6*seq(0,max(mychr$right),10e6),digit=0))
+          polygon(c(xx,rev(xx)),c(yy.q5,rev(yy.q95)),col='gray',border='gray')
+          points(mychr$mids,mychr$m_cj,pch=16,type='b',lty=3)
+
+          ## SNP array map
+          xr=xl+100e6
+          mychr=thechr[thechr$left>xl & thechr$left<xr,]
+          xx=mychr$left
+          xx=rep(xx,each=2)
+          xx=xx[-1]
+          yy.q5=mychr$q5_cj
+          yy.q5=rep(yy.q5,each=2)
+          yy.q5=yy.q5[-length(yy.q5)]
+          yy.q95=mychr$q95_cj
+          yy.q95=rep(yy.q95,each=2)
+          yy.q95=yy.q95[-length(yy.q95)]
+
+          plot(mychr$mids,mychr$m_cj,pch=16,type='n',ylim=c(0,max(dat.snp$q95_cj)),
+               main=paste('Chromosome',ichr,'SNP array'),axes=F,xlim=c(xl,xr),
+               xlab='Position (Mbp)',ylab='Recombination Rate (cM/Mb)')
+          axis(2)
+          axis(1,at=seq(0,max(mychr$right),10e6),
+               label=round(1e-6*seq(0,max(mychr$right),10e6),digit=0))
+          polygon(c(xx,rev(xx)),c(yy.q5,rev(yy.q95)),col='gray',border='gray')
+          points(mychr$mids,mychr$m_cj,pch=16,type='b',lty=3)
+
+      }
+
+  }
+  dev.off()
+
+  ichr=24
+  thechr=dat.snp[ dat.snp$chr==ichr,]
+  thechr$mids=apply(thechr[,c(2,3)],1,mean)
+  thechr.1m=dat.1m[ dat.1m$chr==ichr,]
+  thechr.1m$mids=apply(thechr.1m[,c(2,3)],1,mean)
+  mychr=thechr.1m
+  xx=mychr$left
+  xx=rep(xx,each=2)
+  xx=xx[-1]
+  yy.q5=mychr$q5_cj
+  yy.q5=rep(yy.q5,each=2)
+  yy.q5=yy.q5[-length(yy.q5)]
+  yy.q95=mychr$q95_cj
+  yy.q95=rep(yy.q95,each=2)
+  yy.q95=yy.q95[-length(yy.q95)]
+  par(mfrow=c(2,1))
+  plot(mychr$mids,mychr$m_cj,pch=16,type='n',ylim=c(0,max(dat.1m$q95_cj)),
+       main=paste('Chromosome',ichr,'1Mb Windows'),axes=F,
+       xlab='Position (Mbp)',ylab='Recombination Rate (cM/Mb)')
+  axis(2)
+  axis(1,at=seq(0,max(mychr$right),10e6),
+       label=round(1e-6*seq(0,max(mychr$right),10e6),digit=0))
+  polygon(c(xx,rev(xx)),c(yy.q5,rev(yy.q95)),col='gray',border='gray')
+  points(mychr$mids,mychr$m_cj,pch=16,type='b',lty=3)
+
+  mychr=thechr
+  xx=mychr$left
+  xx=rep(xx,each=2)
+  xx=xx[-1]
+  yy.q5=mychr$q5_cj
+  yy.q5=rep(yy.q5,each=2)
+  yy.q5=yy.q5[-length(yy.q5)]
+  yy.q95=mychr$q95_cj
+  yy.q95=rep(yy.q95,each=2)
+  yy.q95=yy.q95[-length(yy.q95)]
+
+  plot(mychr$mids,mychr$m_cj,pch=16,type='n',ylim=c(0,max(dat.snp$q95_cj)),
+       main=paste('Chromosome',ichr,'SNP array'),axes=F,
+       xlab='Position (Mbp)',ylab='Recombination Rate (cM/Mb)')
+  axis(2)
+  axis(1,at=seq(0,max(mychr$right),10e6),
+       label=round(1e-6*seq(0,max(mychr$right),10e6),digit=0))
+  polygon(c(xx,rev(xx)),c(yy.q5,rev(yy.q95)),col='gray',border='gray')
+  points(mychr$mids,mychr$m_cj,pch=16,type='b',lty=3)
+#+END_SRC
+
+#+ATTR_LATEX: :width 0.8\textwidth :placement [H]
+#+CAPTION: Meiotic recombination map for chromosome 24
+#+NAME: fig:chr24map
+#+RESULTS[bc333a38f321f00c0674cca646f9ffcb7b981152]:
+[[file:figures/chr24_recmap.png]]
+
+
+We can also pool chromosomes by rescaling distances among each
+chromosome to lie between 0 and 1. Looking specifically at the
+distribution of recombination rate estimates as a function of the
+physical distance (in Megabases) from the nearest end, reveals a
+potential bias in regions with 4 Megabases of a chromosome end. This
+is possibly due to undetected crossovers in these regions. Figure
+[[fig:recbychr]] shows rescaled maps along with the recombination rate
+estimates as a function of the distance to a chromosome end.
+
+#+header: :width 10 :height 3.5 :units in :res 100 
+#+BEGIN_SRC R :tangle "code/family_rec_map.R" :session familyrecmap :results output graphics :file figures/recombination_along_chromosomes.png :exports results
+
+
+  dat.1m$x=0
+  dat.1m$dtelo=0
+  dat.1m$mids=apply(dat.1m[,c(2,3)],1,mean)
+  for (ichr in 1:26) {
+      subset=dat.1m$chr==ichr
+      chr.size=max(dat.1m$right[subset])
+      dat.1m$x[subset]=dat.1m$mids[subset]/chr.size
+      dpossible=cbind(dat.1m$mids[subset],chr.size-dat.1m$mids[subset])
+      dat.1m$dtelo[subset]=apply(dpossible,1,min)
+  }
+
+  par(mfrow=c(1,3),mar=c(6,6,4,1))
+  ## metacentric
+  plot.new()
+  plot.window(xlim=c(0,1),ylim=c(0,7))
+  title(xlab='Relative Position on chromosome',ylab='Recombination Rate (cM/Mb)',main='Metacentric autosomes',cex.lab=1.5)
+  axis(1)
+  axis(2)
+  metacent=dat.1m[as.integer(dat.1m$chr)<4,]
+  ss.m=smooth.spline(metacent$x,metacent$m_cj,df=20)
+  points(metacent$x,metacent$m_cj,col='gray',pch=16)
+  lines(ss.m,col=2,lwd=3)
+  ## acrocentric
+  plot.new()
+  plot.window(xlim=c(0,1),ylim=c(0,8))
+  title(xlab='Relative Position on chromosome',ylab='Recombination Rate (cM/Mb)',main='Acrocentric autosomes',cex.lab=1.5)
+  axis(1)
+  axis(2)
+  acrocent=dat.1m[as.integer(dat.1m$chr)>3,]
+  ss.a=smooth.spline(acrocent$x,acrocent$m_cj,df=5)
+  points(acrocent$x,acrocent$m_cj,col='gray',pch=16)
+  lines(ss.a,col=2,lwd=3)
+
+  ## distance to telomere
+  plot(dat.1m$dtelo,dat.1m$m_cj,pch=16,col=rgb(0,0,0,0.2),xlim=c(0,6e7),
+       ylab='Recombination Rate (cM/Mb)',xlab='',
+       main='All autosomes', cex.lab=1.5,
+       axes=F)
+  title(xlab='Distance to Nearest\n Chromosome end (Mb)',line=4,cex.lab=1.5)
+  axis(1,at=seq(0,6e7,1e7),labels=seq(0,60,10))
+  axis(2)
+  ss.telo=smooth.spline(dat.1m$dtelo,dat.1m$m_cj,df=5)
+  lines(ss.telo,lwd=3,col=2)
+  abline(v=4e6,lty=3)
+
+
+  ## remove regions close to chromosome ends
+  chr.size=do.call(cbind,list(by(dat.snp$right,dat.snp$chr,max)))
+  rec.1m=dat.1m
+  rec.snp=dat.snp
+  for (ichr in 1:26) {
+      subset=(rec.1m$chr==ichr)
+      subset= subset & ((rec.1m$left<4e6) | (rec.1m$right > (chr.size[ichr]-4e6)))
+      rec.1m=rec.1m[!subset,]
+      subset=(rec.snp$chr==ichr)  
+      subset=subset & ((rec.snp$left<4e6) | (rec.snp$right > (chr.size[ichr]-4e6)))
+      rec.snp=rec.snp[!subset,]
+  }
+  rec.1m$chr=as.factor(rec.1m$chr)
+  rec.snp$chr=as.factor(rec.snp$chr)
+#+END_SRC
+#+ATTR_LATEX:  :placement [H]
+#+CAPTION: Meiotic recombination rate variation along chromosomes
+#+NAME: fig:recbychr
+#+RESULTS[78aa6e20338428c5f8dfb02b063991dea3e5cc15]:
+[[file:figures/recombination_along_chromosomes.png]]
+
+
+**** Statistical Analysis of Recombination maps
+***** Effect of the number of meioses on recombination rate estimates
+
+As the number of offspring (/i.e./ observed meioses) varies a lot
+among individuals, we want to check wether this influences its mean
+recombination rate estimate, /i.e./ verify that there is no obvious
+bias due to family size in estimating recombination rates. To this end
+we fit a linear model on the effect of the number of meiosis on the
+average number of crossovers per meiosis:
+
+#+BEGIN_SRC R :session grr :tangle "code/grr.R"  :exports both  :results value
+  library(xtable)
+  grr=read.table('results/family/parent_recombination.txt',head=T)
+  mod.nmeio=lm(Ri ~ nbMeio,data=grr)
+  res=summary(mod.nmeio)
+  coef(res)[2,c(1,4)]
+#+END_SRC
+
+#+RESULTS[6bd734a40e56a0b46ffd471b21352e8f6f4fdbf3]:
+|  0.015329808544272 |
+| 0.0528827701092922 |
+
+
+
+#+BEGIN_SRC R :session grr :tangle "code/grr.R"  :results output latex :exports results
+  require(xtable)
+  print(xtable(summary(mod.nmeio),label='tab:nmeio',
+         caption='Estimating and testing the effect of %
+  the number of observed meioses on individual recombination rates.'),include.rownames=FALSE)
+#+END_SRC
+
+#+RESULTS[2a1f8c23b247478153578c7f560d9abdf877f605]:
+#+BEGIN_EXPORT latex
+% latex table generated in R 3.3.3 by xtable 1.8-2 package
+% Wed May 17 10:26:57 2017
+\begin{table}[ht]
+\centering
+\begin{tabular}{rrrr}
+  \hline
+Estimate & Std. Error & t value & Pr($>$$|$t$|$) \\ 
+  \hline
+35.3011 & 0.2150 & 164.18 & 0.0000 \\ 
+  0.0153 & 0.0079 & 1.94 & 0.0529 \\ 
+   \hline
+\end{tabular}
+\caption{Estimating and testing the effect of %
+the number of observed meioses on individual recombination rates.} 
+\label{tab:nmeio}
+\end{table}
+#+END_EXPORT
+
+#+header: :width 5 :height 5 :units in :res 300 
+#+BEGIN_SRC R :tangle "code/grr.R" :session grr :results output graphics :file figures/grr_nmeio.png :exports results 
+  plot(grr$nbMeio,grr$Ri,
+       xlab='Number of Meioses',
+       ylab='Average number of CO / meiosis',
+       axes=F,pch=16)
+  axis(1)
+  axis(2)
+#+END_SRC
+#+ATTR_LATEX: :width 0.5\textwidth :placement [H]
+#+NAME: fig:grr_nmeio
+#+CAPTION: The mean number of crossover of an individual is not related to its number of offspring. 
+#+RESULTS[eb33b12ba2ef6f7ecbbf357ca2dfcaf56a521133]:
+[[file:figures/grr_nmeio.png]]
+
+This analysis reveals that the effect, if any (p=0.0529), is
+very small (1.5 more crossover / 100 meioses) (Table \ref{tab:nmeio},
+Figure [[fig:grr_nmeio]]).
+
+***** Chromosome specific recombination rates
+
+We estimate chromosome specific recombination rates, and fitted two
+relationships between the physical size of a chromosome and its
+recombination rate estimate: =mod.size.log= fits the recombination
+rate as a function of log(size) and =mod.size.inv= as a function of
+1/size.
+
+First, we perform the analysis on the 1 megabase recombination map,
+the resulting chromosome recombination rates are given in Table
+\ref{tab:chr.rec.1m} and Figure [[fig:chrrec1]].
+#+BEGIN_SRC R :tangle "code/family_rec_map.R" :session familyrecmap  :exports code 
+  library(Hmisc)
+  library(xtable)
+  ### CHROMOSOME REC RATE 1 Mb WINDOWS
+  mod=lm(m_cj~chr-1,data=rec.1m,weights=1/s_cj^2)
+  res=summary(mod)
+  rec=res$coefficients[,1]
+  rec.std.err=res$coefficients[,2]
+  err=confint(mod)
+  mod.size.log=lm(rec~log(chr.size),weights=1/rec.std.err^2)
+  mod.size.inv=lm(rec~I(1/chr.size),weights=1/rec.std.err^2)
+  mod.size.log.b=coefficients(mod.size.log)
+  mod.size.inv.b=coefficients(mod.size.inv)
+
+  size2rec.log=function(s) {
+      mod.size.log.b[1]+mod.size.log.b[2]*log(s)
+  }
+  size2rec.inv=function(s) {
+      mod.size.inv.b[1]+mod.size.inv.b[2]/s
+  }
+#+END_SRC
+
+#+RESULTS[9ee11a638fe43fecddf2b84615312922d0d7576a]:
+
+#+BEGIN_SRC R :tangle "code/family_rec_map.R" :session familyrecmap  :exports results :results output latex
+  print(xtable(summary(mod),caption='Chromosome effect model estimates'
+        ,label='tab:chr.rec.1m'),include.rownames=FALSE)
+
+  tw=summary(mod)$coefficients[,c(1,2)]
+  colnames(tw)=c('c','se')
+  write.table(tw,file='results/family/chromosome_rates.txt',quote=F)
+#+END_SRC
+#+RESULTS[cab908823df46e7629cf56a138050ca122962f9c]:
+#+BEGIN_EXPORT latex
+% latex table generated in R 3.3.3 by xtable 1.8-2 package
+% Wed Jun  7 10:31:39 2017
+\begin{table}[ht]
+\centering
+\begin{tabular}{rrrr}
+  \hline
+Estimate & Std. Error & t value & Pr($>$$|$t$|$) \\ 
+  \hline
+1.0100 & 0.0343 & 29.43 & 0.0000 \\ 
+  0.9634 & 0.0354 & 27.22 & 0.0000 \\ 
+  1.1147 & 0.0404 & 27.62 & 0.0000 \\ 
+  1.1265 & 0.0561 & 20.09 & 0.0000 \\ 
+  1.1241 & 0.0597 & 18.82 & 0.0000 \\ 
+  1.0788 & 0.0561 & 19.23 & 0.0000 \\ 
+  1.1375 & 0.0618 & 18.40 & 0.0000 \\ 
+  1.0956 & 0.0639 & 17.13 & 0.0000 \\ 
+  1.0218 & 0.0613 & 16.67 & 0.0000 \\ 
+  0.7468 & 0.0544 & 13.73 & 0.0000 \\ 
+  1.4740 & 0.0936 & 15.75 & 0.0000 \\ 
+  1.1406 & 0.0713 & 16.00 & 0.0000 \\ 
+  1.2048 & 0.0716 & 16.83 & 0.0000 \\ 
+  1.3549 & 0.0891 & 15.21 & 0.0000 \\ 
+  1.1193 & 0.0701 & 15.97 & 0.0000 \\ 
+  1.0810 & 0.0723 & 14.96 & 0.0000 \\ 
+  1.1847 & 0.0766 & 15.48 & 0.0000 \\ 
+  1.1883 & 0.0796 & 14.93 & 0.0000 \\ 
+  1.2628 & 0.0874 & 14.44 & 0.0000 \\ 
+  1.0237 & 0.0869 & 11.79 & 0.0000 \\ 
+  1.3054 & 0.1007 & 12.97 & 0.0000 \\ 
+  1.2561 & 0.0962 & 13.06 & 0.0000 \\ 
+  1.1127 & 0.0815 & 13.66 & 0.0000 \\ 
+  1.5381 & 0.1206 & 12.76 & 0.0000 \\ 
+  1.3660 & 0.1068 & 12.79 & 0.0000 \\ 
+  1.5255 & 0.1147 & 13.30 & 0.0000 \\ 
+   \hline
+\end{tabular}
+\caption{Chromosome effect model estimates} 
+\label{tab:chr.rec.1m}
+\end{table}
+#+END_EXPORT
+
+#+header: :width 11 :height 5 :units in :res 300 
+#+BEGIN_SRC R :tangle "code/family_rec_map.R" :session familyrecmap  :results output graphics :file figures/chrrec_1M.png :exports results 
+  par(mfcol=c(1,2))
+  par(mar=c(5,4,4,1))
+  errbar(1:26,rec,yplus=err[,2],yminus=err[,1],
+         xlab='Chromosome',ylab='Mean recombination rate (cM/Mb)')
+  title(main='One Megabase Windows')
+  par(mar=c(5,4,1,1))
+  errbar(chr.size,rec,yplus=err[,2],yminus=err[,1],
+         xlab='Chromosome Size (Mb)',ylab='Mean recombination rate (cM/Mb)',
+         lwd=2,axes=F,col=1,pch='.',errbar.col='gray')
+  points(chr.size,rec,col=1,pch=16,cex=0.7)
+  axis(1,at=seq(50,250,25)*1e6,labels=seq(50,250,25))
+  axis(2)
+  text(chr.size,rec,1:26,adj=-0.2)
+  xx=seq(30e6,300e6,1e4)
+  lines(xx,size2rec.log(xx),col=4,lty=3,lwd=2)
+  lines(xx,size2rec.inv(xx),col=4,lty=2,lwd=2)
+  legend(200e6,1.6,legend=c('log(size)','1/size'),lty=c(3,2),col=4)
+#+END_SRC
+#+ATTR_LATEX: :placement [H]
+#+NAME: fig:chrrec1
+#+CAPTION: Chromosome specific recombination rates (1Mb windows)
+#+RESULTS[d03e97bcfa5a3ce3a814c84e50a5864d88364e59]:
+[[file:figures/chrrec_1M.png]]
+
+We can perform a similar analysis on SNP array intervals (Table
+\ref{tab:chr.rec.snp}, Figure [[fig:chrrecsnp]] ).
+
+#+BEGIN_SRC R :tangle "code/family_rec_map.R" :session familyrecmap  :exports code 
+  ### CHROMOSOME REC RATE SNP ARRAY
+  mod=lm(m_cj~chr-1,data=rec.snp,weights=1/s_cj^2)
+  res=summary(mod)
+  rec=res$coefficients[,1]
+  rec.std.err=res$coefficients[,2]
+  err=confint(mod)
+  mod.size.log=lm(rec~log(chr.size),weights=1/rec.std.err^2)
+  mod.size.inv=lm(rec~I(1/chr.size),weights=1/rec.std.err^2)
+
+  mod.size.log.b=coefficients(mod.size.log)
+  mod.size.inv.b=coefficients(mod.size.inv)
+  size2rec.log=function(s) { mod.size.log.b[1]+mod.size.log.b[2]*log(s) }
+  size2rec.inv=function(s) { mod.size.inv.b[1]+mod.size.inv.b[2]/s }
+#+END_SRC
+
+#+RESULTS[b70cf9b6b1318d7b73356f5a7ac9d0eecca605d3]:
+
+#+BEGIN_SRC R :tangle "code/family_rec_map.R" :session familyrecmap :results output latex :exports results 
+  print(xtable(summary(mod),caption='Chromosome effect model estimates (SNP array)'
+          ,label='tab:chr.rec.snp'),include.rownames=FALSE)
+#+END_SRC
+
+#+RESULTS[77c5a2e08b2bc723b2ff56398860f4bcdc30e99d]:
+#+BEGIN_EXPORT latex
+% latex table generated in R 3.3.3 by xtable 1.8-2 package
+% Wed Jun  7 10:31:51 2017
+\begin{table}[ht]
+\centering
+\begin{tabular}{rrrr}
+  \hline
+Estimate & Std. Error & t value & Pr($>$$|$t$|$) \\ 
+  \hline
+1.0100 & 0.0343 & 29.43 & 0.0000 \\ 
+  0.9634 & 0.0354 & 27.22 & 0.0000 \\ 
+  1.1147 & 0.0404 & 27.62 & 0.0000 \\ 
+  1.1265 & 0.0561 & 20.09 & 0.0000 \\ 
+  1.1241 & 0.0597 & 18.82 & 0.0000 \\ 
+  1.0788 & 0.0561 & 19.23 & 0.0000 \\ 
+  1.1375 & 0.0618 & 18.40 & 0.0000 \\ 
+  1.0956 & 0.0639 & 17.13 & 0.0000 \\ 
+  1.0218 & 0.0613 & 16.67 & 0.0000 \\ 
+  0.7468 & 0.0544 & 13.73 & 0.0000 \\ 
+  1.4740 & 0.0936 & 15.75 & 0.0000 \\ 
+  1.1406 & 0.0713 & 16.00 & 0.0000 \\ 
+  1.2048 & 0.0716 & 16.83 & 0.0000 \\ 
+  1.3549 & 0.0891 & 15.21 & 0.0000 \\ 
+  1.1193 & 0.0701 & 15.97 & 0.0000 \\ 
+  1.0810 & 0.0723 & 14.96 & 0.0000 \\ 
+  1.1847 & 0.0766 & 15.48 & 0.0000 \\ 
+  1.1883 & 0.0796 & 14.93 & 0.0000 \\ 
+  1.2628 & 0.0874 & 14.44 & 0.0000 \\ 
+  1.0237 & 0.0869 & 11.79 & 0.0000 \\ 
+  1.3054 & 0.1007 & 12.97 & 0.0000 \\ 
+  1.2561 & 0.0962 & 13.06 & 0.0000 \\ 
+  1.1127 & 0.0815 & 13.66 & 0.0000 \\ 
+  1.5381 & 0.1206 & 12.76 & 0.0000 \\ 
+  1.3660 & 0.1068 & 12.79 & 0.0000 \\ 
+  1.5255 & 0.1147 & 13.30 & 0.0000 \\ 
+   \hline
+\end{tabular}
+\caption{Chromosome effect model estimates (SNP array)} 
+\label{tab:chr.rec.snp}
+\end{table}
+#+END_EXPORT
+
+
+#+header: :width 11 :height 5 :units in :res 300 
+#+BEGIN_SRC R :tangle "code/family_rec_map.R" :session familyrecmap :results output graphics :file figures/chrrec_snp.png :exports results
+  par(mfcol=c(1,2))
+  par(mar=c(5,4,4,1))
+  errbar(1:26,rec,yplus=err[,2],yminus=err[,1],
+         xlab='Chromosome',ylab='Mean recombination rate (cM/Mb)')
+  title(main='SNP array Windows')
+  par(mar=c(5,4,1,1))
+  errbar(chr.size,rec,yplus=err[,2],yminus=err[,1],
+         xlab='Chromosome Size (Mb)',ylab='Mean recombination rate (cM/Mb)',
+         lwd=2,axes=F,col=1,pch='.',errbar.col='gray')
+  points(chr.size,rec,col=1,pch=16,cex=0.7)
+  axis(1,at=seq(50,250,25)*1e6,labels=seq(50,250,25))
+  axis(2)
+  text(chr.size,rec,1:26,adj=-0.2)
+  xx=seq(30e6,300e6,1e4)
+  lines(xx,size2rec.log(xx),col=4,lty=3,lwd=2)
+  lines(xx,size2rec.inv(xx),col=4,lty=2,lwd=2)
+  legend(200e6,1.5,legend=c('log(size)','1/size'),lty=c(3,2),col=4)
+#+END_SRC
+
+#+ATTR_LATEX: :placement [H]
+#+CAPTION: Chromosome recombination rates estimates (SNP array)
+#+NAME: fig:chrrecsnp
+#+RESULTS[aa77c57a71d36ac2cd4f9b08c935cf45caac2196]:
+[[file:figures/chrrec_snp.png]]
+
+***** GC Content 
+
+GC content was extracted for each 1 Mb windows and each SNP array
+interval from the reference genome sequence OAR v3.1. 
+
+Results are provided in the =results/genome/GC_Content_*= files. 
+#+BEGIN_SRC R :tangle "code/family_rec_map.R" :session familyrecmap :exports code
+  ## One Mb windows
+  gc1=read.table('data/genome/GC_Content_1Mb.txt',head=TRUE)
+  ## SNP array intervals
+  gcs=read.table('data/genome/GC_Content_SNP_array.txt',head=TRUE)
+  ## check the data are aligned
+  require(assertthat)
+  assert_that(mean(gcs$left==dat.snp$left)==1)
+  assert_that(mean(gc1$left==dat.1m$left)==1)
+
+  gc1$cj=dat.1m$m_cj
+  gcs$cj=dat.snp$m_cj
+
+
+  ## remove extreme regions
+  for (ichr in 1:26) {
+      subset=(gc1$chr==ichr)
+      subset= subset & ((gc1$left<4e6) | (gc1$right > (chr.size[ichr]-4e6)))
+      gc1=gc1[!subset,]
+      subset=(gcs$chr==ichr)  
+      subset=subset & ((gcs$left<4e6) | (gcs$right > (chr.size[ichr]-4e6)))
+      gcs=gcs[!subset,]
+  }
+#+END_SRC
+
+#+RESULTS[0f7922bdb57cf1153ee64dc4a59782a9523826ab]:
+
+A first look at
+the data shows that the relationship between GC content and
+recombination rate is not really linear (Figure [[fig:gc_c_raw]]).
+
+#+HEADER: :width 12 :height 5 :units in :res 300
+#+BEGIN_SRC R :tangle "code/family_rec_map.R" :session familyrecmap  :results output graphics :file figures/gc_c_raw.png :exports results
+  par(mfrow=c(1,2))
+  plot(gc1$gc,gc1$cj,main='One Mb Windows',
+       xlab='GC content (%)',
+       ylab='Rec. rate (cM/Mb)',pch=16,
+       col=rgb(0,0,0,0.1),
+       axes=F)
+  axis(1)
+  axis(2)
+  plot(gcs$gc,gcs$cj,main='SNP array intervals',
+       xlab='GC content (%)',ylab='Rec. rate (cM/Mb)',
+       col=rgb(0,0,0,0.1),
+       pch=16,axes=F)
+  axis(1)
+  axis(2)
+#+END_SRC
+#+ATTR_LATEX: :placement [H]
+#+CAPTION: Recombination rate and GC content -- Raw scale
+#+NAME: fig:gc_c_raw
+#+RESULTS[8309b3b74b72af522f47a619c9af8561b8a0c60f]:
+[[file:figures/gc_c_raw.png]]
+
+We can quantile transform GC content to get a much nicer linear
+relationship between GC and recombination rate (Figure
+[[fig:gc_c_quant]] ).
+
+#+BEGIN_SRC R :tangle "code/family_rec_map.R" :session familyrecmap  :exports code
+  dist.gc1=ecdf(gc1$gc)
+  dist.gcs=ecdf(gcs$gc)
+  ## quantiles of the gc distribution
+  gc1$qgc=dist.gc1(gc1$gc)
+  gcs$qgc=dist.gcs(gcs$gc)
+#+END_SRC
+
+#+RESULTS[443621153f078a8f5069c850e7e76a799c81ac6f]:
+
+#+HEADER: :width 12 :height 5 :units in :res 300
+#+BEGIN_SRC R :tangle "code/family_rec_map.R" :session familyrecmap  :results output graphics :file figures/gc_c_quant.png :exports results 
+  par(mar=c(5,4,1,1),mgp=c(3,1.5,0),mfrow=c(1,2))
+
+  q1=quantile(gc1$gc,p=c(0.1,0.25,0.5,0.75,0.9))
+  ll1=paste(round(q1,digits=1),'\n(',names(q1),')',sep='')
+
+  qs=quantile(gcs$gc,p=c(0.1,0.25,0.5,0.75,0.9))
+  lls=paste(round(qs,digits=1),'\n(',names(qs),')',sep='')
+
+  par(mfrow=c(1,2)) 
+    plot(gc1$qgc,gc1$cj,main='One Mb Windows',
+         xlab='GC content (quantile scale)',
+         ylab='Rec. rate (cM/Mb)',pch=16,
+         col=rgb(0,0,0,0.1),
+         axes=F)
+    axis(1,at=dist.gc1(q1),labels=ll1,adj=1)
+    axis(2)
+    plot(gcs$qgc,gcs$cj,main='SNP array intervals',
+         xlab='GC content (quantile scale)',ylab='Rec. rate (cM/Mb)',
+         col=rgb(0,0,0,0.1),
+         pch=16,axes=F)
+    axis(1,at=dist.gcs(qs),labels=lls,adj=1)
+    axis(2)
+#+END_SRC
+#+ATTR_LATEX: :placement [H]
+#+CAPTION: Recombination rate and GC content -- Quantile scale
+#+NAME: fig:gc_c_quant
+#+RESULTS[bc9deec58509b543eaa5f2c425ede01e095eeea3]:
+[[file:figures/gc_c_quant.png]]
+
+We can fit linear models to test for the effect of GC content on
+recombination rate, adjusted for a chromosome effect.
+#+BEGIN_SRC R :tangle "code/family_rec_map.R" :session familyrecmap  :exports both
+  ## Model on 1 Mb windows, raw GC covariate:
+  gc1$chr=as.factor(gc1$chr)
+  lm.1m.chr=lm(cj~chr,data=gc1)
+  lm.1m.chr.gc=lm(cj~chr+gc,data=gc1)
+  aov.1m.gc=anova(lm.1m.chr,lm.1m.chr.gc)
+  pval.1m.gc=aov.1m.gc['Pr(>F)'][2,1]
+
+  ## Model on 1Mb windows, quantile-transformed gc
+  lm.1m.chr.qgc=lm(cj~chr+qgc,data=gc1)
+  aov.1m.qgc=anova(lm.1m.chr,lm.1m.chr.qgc)
+  pval.1m.qgc=aov.1m.qgc['Pr(>F)'][2,1]
+
+  ## Model on SNP windows, raw GC covariate:
+  gcs$chr=as.factor(gcs$chr)
+  lm.snp.chr=lm(cj~chr,data=gcs)
+  lm.snp.chr.gc=lm(cj~chr+gc,data=gcs)
+  aov.snp.gc=anova(lm.snp.chr,lm.snp.chr.gc)
+  pval.snp.gc=aov.snp.gc['Pr(>F)'][2,1]
+
+  ## Model on SNP windows, quantile-transformed gc
+  lm.snp.chr.qgc=lm(cj~chr+qgc,data=gcs)
+  aov.snp.qgc=anova(lm.snp.chr,lm.snp.chr.qgc)
+  pval.snp.qgc=aov.snp.qgc['Pr(>F)'][2,1]
+
+#+END_SRC
+
+#+RESULTS[ddaf4732a4b1759a55e25fa965baa321cd8c7a0e]:
+: 0
+
+
+#+BEGIN_SRC R  :tangle "code/family_rec_map.R" :session familyrecmap  :exports results :results output latex 
+
+    res.gc=data.frame("Intervals"=c('1 Mb','1 Mb','SNP','SNP'),
+        "GC Model"=c('raw','transformed','raw','transformed'),
+        "logp"=-log10(c(pval.1m.gc,pval.1m.qgc,pval.snp.gc,pval.snp.qgc)))
+    colnames(res.gc)[2]=c('GC content')
+    colnames(res.gc)[3]=c('$-\\log_{10}(p)$')
+    print(xtable(res.gc,
+  caption='Significance of GC content effect on recombination rate'),
+  type='latex',include.rownames=FALSE,sanitize.text.function=function(x){x})
+#+END_SRC
+
+#+RESULTS[928c8fe3378eec345482d6fb66e2c67682d77875]:
+#+BEGIN_EXPORT latex
+% latex table generated in R 3.3.3 by xtable 1.8-2 package
+% Wed Jun  7 10:33:56 2017
+\begin{table}[ht]
+\centering
+\begin{tabular}{llr}
+  \hline
+Intervals & GC content & $-\log_{10}(p)$ \\ 
+  \hline
+1 Mb & raw & 23.95 \\ 
+  1 Mb & transformed & 26.07 \\ 
+  SNP & raw & 218.19 \\ 
+  SNP & transformed & Inf \\ 
+   \hline
+\end{tabular}
+\caption{Significance of GC content effect on recombination rate} 
+\end{table}
+#+END_EXPORT
+
+For all models considered, the effect of GC content on recombination
+rate is highly significant. We store the data in a new file,
+annotating the SNP and 1Mb pedigree maps.
+
+#+BEGIN_SRC R :tangle "code/family_rec_map.R" :session familyrecmap :exports code 
+  write.table(gc1,file='results/family/1Mb_map_annotated.txt',
+              col.names=T,row.names=F,quote=FALSE)
+  write.table(gcs,file='results/family/SNP_array_map_annotated.txt',
+              col.names=T,row.names=F,quote=FALSE)
+#+END_SRC
+
+#+RESULTS[8239ba0cf715248fc26b1bb1fbaf7383a0bbf860]:
+
+*** Population-based recombination maps
+The PHASE output (in directory =results/population/PHASE=) contains
+the posterior distribution of LD-based recombination rates. PHASE was
+run on chromosome windows of 2.2 Mb, with an overlap of 100Kb between
+successive windows to avoid border effects. Each window has its own
+output file within its own sub-directory of the form
+(=CHRNUM/BEGIN-END=). From these posterior distribution, we first
+extract point estimates of LD-based recombination rates using the
+python script =code/make_pop_map.py=. 
+
+This script creates the =results/population/HD_SNP_array_map.txt=
+file.
+
+#+BEGIN_SRC sh :tangle "code/run_scripts.sh"
+python code/make_pop_map.py --dir data/population/PHASE/ --pad 1e5
+#+END_SRC
+
+From the PHASE output, we extract samples of the posterior distribution
+of recombination rates on one megabase windows along the genome. They
+will be used for the combination of meiotic and LD-based recombination
+estimates.
+
+#+BEGIN_SRC sh :tangle "code/run_scripts.sh"
+  python code/get_ld_rec_samples.py
+#+END_SRC
+**** Identification of crossing over hotspots
+Based on the distribution of interval specific recombination
+intensities, we identified cross-over hotspots as follows. 
+
+We fit a mixture of two Gaussian distribution to the genome-wide
+distribution of interval recombination intensities. The fit to the
+observed distribution is good, and the major component is interpreted
+as the distribution of non-hotposts intervals. We can thus for a given
+interval test the hypothesis that its intensity comes from the major
+component of the mixture, and get a corresponding p-value (Figure fig:call_hostpots). 
+
+#+HEADER: :width 12 :height 5 :units in :res 300
+#+BEGIN_SRC R :tangle code/rec_hotspots.R :session ldmaps :exports both :results output graphics :file "figures/ld_intensities.png" 
+  ## read in LD map
+  rhomap = read.table('results/population/HD_SNP_array_map51.txt', head=T)
+  ## model the distribution of recombination intensities lambda (log scale)
+  ## as a mixture of normal (note the prior distribution is p(log(lambda)~N(.)))
+  library(mclust)
+  mc=Mclust(log10(rhomap$lambda),G=2)
+  ## get parameters of the two components
+  pars = mc$parameters
+  xx=seq(-3,3,0.01)
+  d1.pars=c(pars$mean[1],sqrt(pars$variance$scale[1]))
+  d2.pars=c(pars$mean[2],sqrt(pars$variance$scale[2]))
+  d1=dnorm(xx, mean = d1.pars[1], sd = d1.pars[2])
+  d2=dnorm(xx, mean = d2.pars[1], sd = d2.pars[2])
+  ## compute p-values corresponding to H0: interval in background distribution
+  ## vs. H1: hotspot
+  if (pars$pro[1]>pars$pro[2]) {
+      null.pars=d1.pars
+  } else {
+      null.pars=d2.pars
+  }
+  pval=pnorm(log10(rhomap$lambda), mean=null.pars[1],
+      sd=null.pars[2], lower.tail=F)
+  ## Graphical representation of the fit
+  par(mfrow=c(1,2))
+  hist(log10(rhomap$lambda), n=100, freq=F,
+       xlab=expression(log10(lambda[i])), main='')
+  lines(xx, pars$pro[1]*d1, col=2, lwd=2)
+  lines(xx, pars$pro[2]*d2, col=4, lwd=2)
+  hist(pval,main='P-Value distribution',xlab='',freq=F,n=100)
+  abline(h=1,lwd=2,lty=2,col='gray')
+#+END_SRC
+#+ATTR_LATEX: :placement [H]
+#+CAPTION: Distribution of interval specific recombination intensities and clustering in hotspots / non hotspots
+#+NAME: fig:call_hotspots
+#+RESULTS[6908988b7b243ed4ef25fe0d23ba90871c74131f]:
+[[file:figures/ld_intensities.png]]
+
+Based on the p-value distribution, we used the Storey and Tibshirani
+(2003) approach to estimate (i) the proportion of crossover hotspots
+on the sheep genome and (ii) call significant hotspot intervals at an
+FDR of 5%.
+
+#+BEGIN_SRC R :tangle "code/rec_hotspots.R" :session ldmaps :exports both  
+  library(qvalue)
+  qval = qvalue(pval)
+  length(pval)
+  ## Estimate of the number of hotspots in the sheep genome
+  nhs=length(pval)*(1-qval$pi0)
+  print(paste('Estimated # hotspots intervals:',nhs))
+  ## call hotspots 
+  rhomap$hotspot = qval$qvalues < 0.05
+  rhomap$qvalue = qval$qvalues
+  hsmap=subset(rhomap, select = c('chr', 'left', 'right', 'qvalue', 'hotspot' ))
+  write.table(hsmap,row.names=F,quote=F,file='results/population/hotspots51.txt')
+#+END_SRC
+
+#+RESULTS[0911449d46704d88592f0c60f4ee94f095b667e6]:
+
+To measure heterogeneity in the distribution of recombination, we
+ compute a gini coefficient (Kaur and Rockman, 2014) based on the
+ evolution of cumulated physical distance of intervals ordered by
+ their genetic distance (Figure [[fig:gini]]).
+
+#+HEADER: :width 5 :height 5 :units in :res 300
+#+BEGIN_SRC R :tangle "code/rec_hotspots.R" :session ldmaps :exports results :results output graphics :file "figures/gini_ldmap.png" 
+  require(MESS)
+  ## physical distance for each chromosome
+  physd = as.numeric(by(rhomap$right, rhomap$chr, max))
+  ## genetic distance for each chromosome
+  gend = as.numeric(by(rhomap$delta, rhomap$chr, sum))
+  ## Genomic Length (in bp)
+  genome.L = sum(physd)
+  ## Genetic Length (in rho scale)
+  genome.G = sum(gend)
+
+  rhomap$len=rhomap$right-rhomap$left
+
+  ## order intervals based on decreasing LD genetic distance
+  o = sort(rhomap$delta, decreasing=T, index.return=T)$ix
+  ## cumulative proportion of physical distance covered
+  x = cumsum(as.numeric(rhomap$len[o]))/genome.L
+  ## corresponding proportion of genetic distance covered
+  y = cumsum(rhomap$delta[o])/genome.G
+  ## Gini coefficient
+  gini=1-2*auc(y,x)
+  par(mar=c(5,5,1,1))
+  plot.new()
+  plot.window(xlim=c(0,1),ylim=c(0,1))
+  title( xlab='Cumulated Genetic Distance', ylab='Cumulated Physical Distance',cex.lab=1.5)
+  xpol=c(x,rev(x))
+  ypol=c(y,rev(x))
+  polygon(ypol,xpol,col="Sienna",border=NA)
+  lines(y, x, lwd=4,axes=F)
+  axis(1,cex.axis=1.5)
+  axis(2,cex.axis=1.5)
+  segments(x0=0,y0=0,x1=1,y1=1,lwd=4,lty=2)
+  text(0,0.8,labels=paste("Gini coef. =",round(gini,digits=2)),adj=0,cex=1.5,col='Sienna')
+#+END_SRC
+#+ATTR_LATEX: :placement [H] :width 0.5\textwidth
+#+CAPTION: Heterogeneity in recombination rate measured from the evolution of physical distance covered by the genetic map.
+#+NAME: fig:gini
+#+RESULTS[a13a70529abdaaaee1be9f4238121ae7c5e349cc]:
+[[file:figures/gini_ldmap.png]]
+
+*** Effect of hotspot density on meiotic recombination rate
+
+These commands must be ran after performing the LD-based
+analysis and detecting crossover hotspots.
+
+First, we gather the number of hotspots within each interval on the
+one-Megabase and SNP array meiotic recombination maps.
+#+BEGIN_SRC R :tangle "code/family_rec_map.R" :session familyrecmap :exports code 
+  hsmap=read.table('results/population/hotspots51.txt',h=T)
+
+
+
+  ## Get number of hotspots in intervals
+  getnhs=function(v,hsdat=hsmap) {
+      v=as.integer(v)
+      hs.loc=hsdat[(hsdat[,1]==v[1])&(hsdat[,2]>=v[2])&(hsdat[,3]<=v[3]),]
+      return(sum(hs.loc[,5]))
+  }
+
+  gc1$nhs=apply(gc1[,c(1,2,3)],1,getnhs)
+  gcs$nhs=apply(gcs[,c(1,2,3)],1,getnhs)
+
+  ## calculate hotspot density (in HS / 10Kb) for SNP array map
+  gcs$len=gcs$right-gcs$left
+  gcs$hsdens=1e4*gcs$nhs/gcs$len 
+
+
+#+END_SRC 
+
+Correlations between meiotic recombination rates and historical
+hotspots on the SNP array map
+#+BEGIN_SRC R :tangle "code/family_rec_map.R" :session familyrecmap :exports both :results output latex 
+  csnp.nhs=cor.test(gcs$cj,gcs$nhs)
+  csnp.hsdens=cor.test(gcs$cj,gcs$hsdens)
+  c1.nhs=cor.test(gc1$cj,gc1$nhs)
+  pval.vec=c(c1.nhs$p.value,csnp.nhs$p.value,csnp.hsdens$p.value)
+  res.cor=data.frame("Intervals"=c('1 Mb','SNP','SNP'),
+      "HS model"=c('number/density','number','density'),
+      "corr."=c(c1.nhs$estimate,csnp.nhs$estimate,csnp.hsdens$estimate),
+      "p-value"=-log10(pval.vec))
+
+  colnames(res.cor)[2]=c('HS effect')
+  colnames(res.cor)[3]=c('Correlation')
+  colnames(res.cor)[4]=c('$-\\log_{10}(p)$')
+
+  print(xtable(res.cor,
+    caption='Correlation between historical hotspots and meiotic recombination rate.%
+    Number:  number of hotspots.%
+    Density:  density of hotspots (in HS/10Kb).'),
+    type='latex',include.rownames=FALSE,sanitize.text.function=function(x){x})
+#+END_SRC
+#+RESULTS[b8847a876cd981c580098392476a75e9b0dd25c5]:
+#+BEGIN_EXPORT latex
+% latex table generated in R 3.3.3 by xtable 1.8-2 package
+% Mon Jun 26 17:41:29 2017
+\begin{table}[ht]
+\centering
+\begin{tabular}{llrr}
+  \hline
+Intervals & HS effect & Correlation & $-\log_{10}(p)$ \\ 
+  \hline
+1 Mb & number/density & 0.46 & 115.30 \\ 
+  SNP & number & 0.19 & Inf \\ 
+  SNP & density & 0.15 & 220.53 \\ 
+   \hline
+\end{tabular}
+\caption{Correlation between historical hotspots and meiotic recombination rate.%
+  Number:  number of hotspots.%
+  Density:  density of hotspots (in HS/10Kb).} 
+\end{table}
+#+END_EXPORT
+
+Then we add as a new covariate the number of hotspots  to our linear
+models on meiotic recombination rates. 
+
+#+BEGIN_SRC R :tangle "code/family_rec_map.R" :session familyrecmap :exports both :results output latex 
+
+  lm.1m.chr.qgc.nhs=lm(cj ~ chr + qgc + nhs, data=gc1)
+  aov.1m.qgc.nhs=anova(lm.1m.chr.qgc,lm.1m.chr.qgc.nhs)
+  pval.1m.qgc.nhs=aov.1m.qgc.nhs['Pr(>F)'][2,1]
+
+  lm.snp.chr.qgc.nhs=lm(cj ~ chr + qgc + nhs, data=gcs)
+  aov.snp.qgc.nhs=anova(lm.snp.chr.qgc,lm.snp.chr.qgc.nhs)
+  pval.snp.qgc.nhs=aov.snp.qgc.nhs['Pr(>F)'][2,1]
+
+
+  lm.snp.chr.qgc.hsdens=lm(cj ~ chr + qgc + hsdens, data=gcs)
+  aov.snp.qgc.hsdens=anova(lm.snp.chr.qgc,lm.snp.chr.qgc.hsdens)
+  pval.snp.qgc.hsdens=aov.snp.qgc.hsdens['Pr(>F)'][2,1]
+
+  res.hs=data.frame("Intervals"=c('1 Mb','SNP','SNP'),
+          "HS model"=c('number/density','number','density'),
+      "logp"=-log10(c(pval.1m.qgc.nhs,pval.snp.qgc.nhs,pval.snp.qgc.hsdens)))
+
+
+  colnames(res.hs)[2]=c('HS effect')
+  colnames(res.hs)[3]=c('$-\\log_{10}(p)$')
+
+  print(xtable(res.hs,
+  caption='Significance of hotspot effect on meiotic recombination rate.%
+  Number: effect of the number of hotspots.%
+  Density: effect of the density of hotspots (in HS/10Kb).'),
+  type='latex',include.rownames=FALSE,sanitize.text.function=function(x){x})
+#+END_SRC
+
+#+RESULTS[7468b8e36b156287d258bfd7ca9628eda907b326]:
+#+BEGIN_EXPORT latex
+% latex table generated in R 3.3.3 by xtable 1.8-2 package
+% Mon Jun 26 17:40:56 2017
+\begin{table}[ht]
+\centering
+\begin{tabular}{llr}
+  \hline
+Intervals & HS effect & $-\log_{10}(p)$ \\ 
+  \hline
+1 Mb & number/density & 104.23 \\ 
+  SNP & number & 316.41 \\ 
+  SNP & density & 191.83 \\ 
+   \hline
+\end{tabular}
+\caption{Significance of hotspot effect on meiotic recombination rate.%
+Number: effect of the number of hotspots.%
+Density: effect of the density of hotspots (in HS/10Kb).} 
+\end{table}
+#+END_EXPORT
+
+Calculate correlations corrected for chromosome and gc content
+effects.
+
+#+BEGIN_SRC R :tangle "code/family_rec_map.R" :session familyrecmap :exports both :results output latex 
+    csnp.nhs=cor.test(residuals(lm.snp.chr.qgc),gcs$nhs)
+    csnp.hsdens=cor.test(residuals(lm.snp.chr.qgc),gcs$hsdens)
+    c1.nhs=cor.test(residuals(lm.1m.chr.qgc),gc1$nhs)
+    pval.vec=c(c1.nhs$p.value,csnp.nhs$p.value,csnp.hsdens$p.value)
+    res.cor.res=data.frame("Intervals"=c('1 Mb','SNP','SNP'),
+        "HS model"=c('number/density','number','density'),
+        "corr."=c(c1.nhs$estimate,csnp.nhs$estimate,csnp.hsdens$estimate),
+        "p-value"=-log10(pval.vec))
+
+    colnames(res.cor.res)[2]=c('HS effect')
+    colnames(res.cor.res)[3]=c('Correlation')
+    colnames(res.cor.res)[4]=c('$-\\log_{10}(p)$')
+
+    print(xtable(res.cor.res,
+      caption='Correlation between historical hotspots and meiotic recombination rate%
+      corrected for chromosome and GC content effects.%
+      Number:  number of hotspots.%
+      Density:  density of hotspots (in HS/10Kb).'),
+      type='latex',include.rownames=FALSE,sanitize.text.function=function(x){x})
+
+#+END_SRC
+
+#+RESULTS:
+#+BEGIN_EXPORT latex
+% latex table generated in R 3.3.3 by xtable 1.8-2 package
+% Mon Jun 26 17:46:52 2017
+\begin{table}[ht]
+\centering
+\begin{tabular}{llrr}
+  \hline
+Intervals & HS effect & Correlation & $-\log_{10}(p)$ \\ 
+  \hline
+1 Mb & number/density & 0.43 & 100.69 \\ 
+  SNP & number & 0.18 & 314.09 \\ 
+  SNP & density & 0.14 & 190.55 \\ 
+   \hline
+\end{tabular}
+\caption{Correlation between historical hotspots and meiotic recombination rate%
+  corrected for chromosome and GC content effects.%
+  Number:  number of hotspots.%
+  Density:  density of hotspots (in HS/10Kb).} 
+\end{table}
+#+END_EXPORT
+
+*** Combining family- and LD-based inferences
+
+**** Illustration of the approach
+
+We can illustrate the comparison betwee the two approach on
+chromosome 24. First we run a script to gather data from LD-based and
+pedigree-based maps. This creates two files
+=results/combined/compare_family_1Mb.txt= and
+=results/combined/compare_family_60K.txt=. 
+
+#+BEGIN_SRC bash
+python code/compare_maps.py
+#+END_SRC
+
+This allows to plot the different maps easily, as shown here for two
+windows on chromosome 24
+
+#+HEADER: :width 15 :height 25 :unit in :res 200
+#+BEGIN_SRC R :tangle "code/fam_pop_comp.R" :session chr24 :exports none
+  dat.1m=read.table('results/family/1Mb_map.txt',h=T,fill=NA)
+  dat.snp=read.table('results/family/SNP_array_map.txt',h=T,fill=NA)
+  dat.comb=read.table('results/combined/compare_family_60K.txt',h=T)
+  pop.hd=read.table('results/population/HD_SNP_array_map.txt',h=T)
+
+  pop.hd$rho=1e3*pop.hd$delta/(pop.hd$right-pop.hd$left) ## per Kb
+
+  ## Whole chromosome
+  ichr = 24
+  thechr=dat.snp[ dat.snp$chr==ichr,]
+  thechr$mids=apply(thechr[,c(2,3)],1,mean)
+  thechr.1m=dat.1m[ dat.1m$chr==ichr,]
+  thechr.1m$mids=apply(thechr.1m[,c(2,3)],1,mean)
+  mychr=thechr.1m 
+
+  png(file='figures/chr24_pop_fam_comp.png',w=14,h=20,unit='cm',res=200.)
+  M = matrix(c(1,1,2,5,3,6,4,7), 4, 2, byrow = TRUE)
+  layout(M)
+
+  xx=mychr$left
+  xx=rep(xx,each=2)
+  xx=xx[-1]
+  yy.q5=mychr$q5_cj
+  yy.q5=rep(yy.q5,each=2)
+  yy.q5=yy.q5[-length(yy.q5)]
+  yy.q95=mychr$q95_cj
+  yy.q95=rep(yy.q95,each=2)
+  yy.q95=yy.q95[-length(yy.q95)]
+
+
+  plot(mychr$mids,mychr$m_cj,pch=16,type='n',ylim=c(0,max(dat.1m$q95_cj)),
+       main=paste('Chromosome',ichr),axes=F,
+       xlab='Position (Mb)',ylab='Recombination rate c')
+  axis(2)
+  axis(1,at=seq(0,max(mychr$right),1e6),label=NA)
+  axis(1,at=seq(0,max(mychr$right),10e6),
+       label=round(1e-6*seq(0,max(mychr$right),10e6),digit=0))
+  polygon(c(xx,rev(xx)),c(yy.q5,rev(yy.q95)),col='gray',border='gray')
+  points(mychr$mids,mychr$m_cj,pch=16,type='b',lty=3)
+
+  ## highlight windows
+  hi.win=6
+  xx=c(mychr$left[hi.win],mychr$right[hi.win])
+  yy.q5=mychr$q5_cj[hi.win]
+  yy.q5=rep(yy.q5,each=2)
+  yy.q95=mychr$q95_cj[hi.win]
+  yy.q95=rep(yy.q95,each=2)
+  polygon(c(xx,rev(xx)),c(yy.q5,rev(yy.q95)),col=NULL,border='darkred',lwd=2)
+
+
+  low.win=19
+  xx=c(mychr$left[low.win],mychr$right[low.win])
+  yy.q5=mychr$q5_cj[low.win]
+  yy.q5=rep(yy.q5,each=2)
+  yy.q95=mychr$q95_cj[low.win]
+  yy.q95=rep(yy.q95,each=2)
+  polygon(c(xx,rev(xx)),c(yy.q5,rev(yy.q95)),col=NULL,border='darkblue',lwd=2)
+
+  ####### Hi Window
+
+  mysnp=(dat.comb$left>5e6) & (dat.comb$right<6e6) &(dat.comb$chr==24)
+  tt=seq(5e6,6e6,2e5)
+  b=seq(5e6,6e6,1e5)
+  mc=mychr$m_cj[hi.win]
+
+  #### meiotic 50K
+  plot(dat.comb$left[mysnp],dat.comb$c[mysnp],type='n',ylab='c (cM/Mb)',
+       xlab = "Position (Mb)", main = "c on 50K",
+       ylim=c(0,9),axes=F,xlim=c(5e6,6e6))
+  abline(v=b, col="grey", lwd = 1, lty = 2)
+  points(dat.comb$left[mysnp],dat.comb$c[mysnp],type='s',
+         pch = 16, lwd = 3, col='darkred')
+  axis(2, lwd = 2)
+  axis(1,at=tt,labels=round(tt*1e-6,digits=1),lwd=2)
+
+  #### LD based 50K
+  plot(dat.comb$left[mysnp],dat.comb$rho[mysnp],type='n',
+       main = expression(paste(rho," ", "on 50K")),
+       xlab = "Position (Mb)", ylab = expression(paste(rho, "(/kb)")),
+       ylim=c(0,1.5)*1e-3,axes=F,xlim=c(5e6,6e6))
+  abline(v=b, col="grey", lwd = 1, lty = 2)
+  points(dat.comb$left[mysnp],dat.comb$rho[mysnp],type='s',
+         pch = 16, lwd = 3, col='darkred')
+  axis(2, lwd = 2,at=seq(0,1.5,0.5)*1e-3,labels=seq(0,1.5,0.5))
+  axis(1,at=tt,labels=round(tt*1e-6,digits=1),lwd=2)
+
+  ##### LD based 600K
+  mysnp=(pop.hd$chr==24) & (pop.hd$left>5e6) & (pop.hd$right<6e6)
+  plot(pop.hd$left[mysnp],pop.hd$rho[mysnp],type='n',
+       main = expression(paste(rho," ", "on 600K")),
+       xlab = "Position (Mb)", ylab = expression(paste(rho, "(/kb)")),
+       ylim=c(0,7),axes=F,xlim=c(5e6,6e6))
+  abline(v=b, col="grey", lwd = 1, lty = 2)
+  points(pop.hd$left[mysnp],pop.hd$rho[mysnp],type='s',
+         pch = 16, lwd = 3, col='darkred')
+  axis(2, lwd = 2,at=seq(0,7,1))
+  axis(1,at=tt,labels=round(tt*1e-6,digits=1),lwd=2)
+
+  ####### Lo Window
+
+  mysnp=(dat.comb$left>18e6) & (dat.comb$right<19.1e6) &(dat.comb$chr==24)
+  tt=seq(18e6,19e6,2e5)
+  b=seq(18e6,19e6,1e5)
+  mc=mychr$m_cj[low.win]
+
+  #### meiotic 50K
+  plot(dat.comb$left[mysnp],dat.comb$c[mysnp],type='n',ylab='c (cM/Mb)',
+       xlab = "Position (Mb)", main = "c on 50K",
+       ylim=c(0,9),axes=F,xlim=c(18e6,19e6))
+  abline(v=b, col="grey", lwd = 1, lty = 2)
+  points(dat.comb$left[mysnp],dat.comb$c[mysnp],type='s',
+         pch = 16, lwd = 3, col='darkblue')
+  axis(2, lwd = 2)
+  axis(1,at=tt,labels=round(tt*1e-6,digits=1),lwd=2)
+
+  #### LD based 50K
+  plot(dat.comb$left[mysnp],dat.comb$rho[mysnp],type='n',
+       main = expression(paste(rho," ", "on 50K")),
+       xlab = "Position (Mb)", ylab = expression(paste(rho, "(/kb)")),
+       ylim=c(0,1.5)*1e-3,axes=F,xlim=c(18e6,19e6))
+  abline(v=b, col="grey", lwd = 1, lty = 2)
+  points(dat.comb$left[mysnp],dat.comb$rho[mysnp],type='s',
+         pch = 16, lwd = 3, col='darkblue')
+  axis(2, lwd = 2,at=seq(0,1.5,0.5)*1e-3,labels=seq(0,1.5,0.5))
+  axis(1,at=tt,labels=round(tt*1e-6,digits=1),lwd=2)
+
+  ##### LD based 600K
+  mysnp=(pop.hd$chr==24) & (pop.hd$left>18e6) & (pop.hd$right<19e6)
+  plot(pop.hd$left[mysnp],pop.hd$rho[mysnp],type='n',
+       main = expression(paste(rho," ", "on 600K")),
+       xlab = "Position (Mb)", ylab = expression(paste(rho, "(/kb)")),
+       ylim=c(0,7),axes=F,xlim=c(18e6,19e6))
+  abline(v=b, col="grey", lwd = 1, lty = 2)
+  points(pop.hd$left[mysnp],pop.hd$rho[mysnp],type='s',
+         pch = 16, lwd = 3, col='darkblue')
+  axis(2, lwd = 2,at=seq(0,7,1))
+  axis(1,at=tt,labels=round(tt*1e-6,digits=1),lwd=2)
+  dev.off()
+#+END_SRC
+
+#+RESULTS[e2a2ef019a27aecfee191c8e3cf23c679b7ffa0f]:
+: 1
+
+
+
+[[file:figures/chr24_pop_fam_comp.png]]
+
+**** Linear Mixed model combining pedigree and LD analyses
+
+A high-density recombination map should provide the recombination rate
+in small intervals on the genome. Here the intervals are defined by
+the position of the HD SNP array markers. To obtain a HD recombination
+map, the approach taken is to correct LD-based recombination rates for
+the influence of demography and scale them in centiMorgans/Megabase
+unit. The influence of demography is measured by a multiplicative
+factor that corresponds to the effective number of chromosomes
+(Ne). This parameter Ne can change along the genome, in particular due
+to past selection. To account for this effect, we estimate a different
+value of the parameter for windows of 1 megabase along the genome,
+using linear mixed models.
+
+The model considered includes a =method= fixed effect, which estimates
+the (log10 of the) main multiplicative factor 4*Ne, /i.e/ it provides
+an estimate of the (log10) average effective population size of the
+Lacaune population.
+
+Next, it includes a chromosome random effect to account for different
+recombination rates between chromosomes.
+
+Finally, it includes a =seg= random effect, which models the
+recombination rate variation between windows and finally a /method
+within segment/ =seg/method= effect that models difference in
+recombination rates estimates by the two methods (family and pop) for
+each window.
+
+#+BEGIN_SRC R :session hdrecmap :tangle "code/hdrecmap.R" :exports code
+  library(lme4)
+  library(reshape2)
+  ## read in data and combine samples
+  fam=read.table('results/combined/comb_1Mb_map_family.txt',head=T)
+  pop=read.table('results/combined/comb_1Mb_map_pop51.txt',head=T)
+  tot=rbind(fam,pop)
+  tot$seg=paste(tot$chr,tot$left,tot$right,sep='-')
+  tot$seg=as.factor(tot$seg)
+  chrsize=do.call(rbind,list(by(tot$right,tot$chr,max)))
+  ## remove extremities
+  for(i in 1:26) {
+      end=chrsize[i]
+      torm=(tot$chr==i)&(tot$right<=4e6)
+      tot=tot[!torm,]
+      torm=(tot$chr==i)&(tot$right>=(end-4e6))
+      tot=tot[!torm,]
+  }
+  ## The response considered is the log(10) of recombination rate
+  tot$logc=log10(tot$value)
+
+  ## Fit a linear mixed model to estimate local Ne
+  mymod=lmer(logc~method+(1|chr)+(1|seg/method),data=tot)
+#+END_SRC
+
+#+RESULTS[7e81219eda609d3ef39800f51a16ca85163409a9]:
+
+#+BEGIN_SRC R :session hdrecmap :tangle "code/hdrecmap.R" :exports results :results output 
+  library(utils)
+  library(ascii)
+  options(asciiType="org")
+
+  ss=capture.output(summary(mymod))
+  ss=as.data.frame(ss)
+  ## rownames and colnames argument to avoid output bug from CRAN version 
+  ascii(ss,include.rownames=F,include.colnames=F,rownames=1,colnames=2)
+#+END_SRC
+
+#+RESULTS[0ff54435a6a9f5e071db43e9955fab4f609d978d]:
+#+begin_example
+| Linear mixed model fit by REML ['lmerMod']                          |
+|---------------------------------------------------------------------|
+| Formula: logc ~ method + (1  \vert  chr) + (1  \vert  seg/method)   |
+| Data: tot                                                           |
+|                                                                     |
+| REML criterion at convergence: -250447.6                            |
+|                                                                     |
+| Scaled residuals:                                                   |
+| Min       1Q   Median       3Q      Max                             |
+| -10.8780  -0.5469   0.0124   0.5739   8.9327                        |
+|                                                                     |
+| Random effects:                                                     |
+| Groups     Name        Variance Std.Dev.                            |
+| method:seg (Intercept) 0.012832 0.11328                             |
+| seg        (Intercept) 0.031638 0.17787                             |
+| chr        (Intercept) 0.001552 0.03940                             |
+| Residual               0.002685 0.05181                             |
+| Number of obs: 89160, groups:  method:seg, 4458; seg, 2229; chr, 26 |
+|                                                                     |
+| Fixed effects:                                                      |
+| Estimate Std. Error t value                                         |
+| (Intercept) 0.100447   0.009185    10.9                             |
+| methodpop   4.449792   0.003411  1304.6                             |
+|                                                                     |
+| Correlation of Fixed Effects:                                       |
+| (Intr)                                                              |
+| methodpop -0.186                                                    |
+#+end_example
+
+The =(Intercept)= term estimates the base recombination rate: on a log
+10 scale ~ 0.1, corresponding to ~ 1.26 cM/Mb. The =methodpop= term
+estimates log10(4Ne), where Ne is the genome averaged effective
+population size, here ~ 4.45, corresponding to Ne ~ 7000 individuals.
+
+We can now rescale LD-based recombination rate for the genome average
+Ne and compare them to meiotic recombination rates. We first extract
+the predicted recombination rate in each segments for both approaches,
+then remove the log10(4Ne) term from the LD-based estimates.
+
+#+HEADER: :width 6 :height 6 :units in :res 300
+#+BEGIN_SRC R :session hdrecmap :tangle "code/hdrecmap.R" :exports both :results output graphics :file "figures/family_pop_correlation.png"
+  require(lme4)
+  ## Genome wide scaling factor for LD-based estimates
+  log.Ne=fixef(mymod)[2]
+  ## Get predicted values in each segment
+  pred=tot[tot$rep==0,]
+  fit.val=predict(mymod,pred)
+  pred$fit=fit.val
+  pred.wide=dcast(pred,chr + left + right + seg ~ method,value.var='fit')
+  linmod=lm(I(pop-log.Ne)~family,data=pred.wide)
+
+
+  fam.c=pred.wide$family
+  ## rescale LD-based estimates
+  pop.c=pred.wide$pop-log.Ne
+
+  ## correlation between LD and family based estimates
+  cor.c=cor(pred.wide$family,pred.wide$pop)
+
+  par(mar=c(5,6,1,1))
+
+  plot(fam.c,pop.c,
+       pch=19,col=rgb(0.63,0.32,0.17,0.2),axes=F,
+       xlab='Meiotic recombination rate (cM/Mb)',
+       ylab='',
+       xlim=c(-1,1),
+       ylim=c(-1.5,1),
+       cex.lab=1.5
+       )
+  lab.x=c(0.1,0.25,0.5,1,2,4,10)
+  tks.x=log10(lab.x)
+  lab.y=c(0.05,0.25,0.1,0.5,1,2,4,10)
+  tks.y=log10(lab.y)
+  axis(1,at=tks.x,lab=lab.x,cex.axis=1.3)
+  axis(2,at=tks.y,lab=lab.y,las=2,cex.axis=1.3)
+  title(ylab='Scaled historical recombination rate (cM/Mb)',line=4,cex.lab=1.5)
+  abline(coef=coef(linmod),lwd=2,lty=2)
+  text(log10(4),log10(0.1),labels=paste('Correlation = ',round(cor.c,digits=2)),cex=1.5)
+#+END_SRC
+#+ATTR_LATEX: :placement [H] :width 0.5\textwidth
+#+CAPTION: Meiotic and scaled historical recombination rates in windows of one megabase. The dashed line is the regression for population recombination rate on the family recombination rate. Values are shown on a logarithmic scale.  
+#+NAME: fig:fampop
+#+RESULTS[55122516b23d30c3619c652ffb101f7bf5cd54b6]:
+[[file:figures/family_pop_correlation.png]]
+
+**** Identification of windows with outlying differences between historical and meiotic recombination rates
+
+We can then examine individual windows to identify outliers: windows
+where LD-based estimates are significantly too high or too low, given
+the meiotic recombination rate. To avoid effects due to low coverage
+of the HD SNP chip, we correct for the a  SNP density effect.
+
+#+BEGIN_SRC R :session hdrecmap :tangle "code/hdrecmap.R" :exports both :results output graphics :file "figures/pedpop_residuals.png"
+  ## Get HD SNP map
+  snps=read.table('data/population/HDpanel/Lacaune.bim')
+  colnames(snps)=c('chr','name','gen','pos','A1','A2')
+
+  ## function to compute number of SNP within a window
+  nsnp.seg=function(coord,pmap) {
+      sub.snp=(pmap$chr==as.integer(coord[1]))&(pmap$pos>=coord[2])&(pmap$pos<=coord[3])
+      return(sum(sub.snp))
+  }
+
+  pred.wide$nsnps=apply(pred.wide[,c(1,2,3)],1,nsnp.seg,pmap=snps)
+
+  pred.wide$len=pred.wide$right-pred.wide$left
+  pred.wide$snpdens=pred.wide$nsnps/pred.wide$len
+
+  ## fit a linear model of historical rate with meiotic rate,
+  ## adjusting for snp density (on a log scale)
+
+  linmod=lm(I(pop-log.Ne)~I(log10(snpdens))+family,data=pred.wide)
+
+  ## We want to look at regions where pop and family are significantly different
+  require(MASS)
+  str.resid.pop=studres(linmod)
+  pred.wide$pval.hi=as.vector(pnorm(str.resid.pop,lower.tail=F))
+  pred.wide$pval.lo=as.vector(pnorm(str.resid.pop))
+
+  hh=hist(str.resid.pop,n=100,
+      main='Historical Rates Residuals',
+      xlab='Studentized Residuals',
+      freq=FALSE)
+  xx=seq(-10,10,0.01)
+  lines(xx,dnorm(xx),lwd=2)
+
+#+END_SRC
+#+ATTR_LATEX: :placement [H] :width 0.5\textwidth
+#+CAPTION: Residuals from the linear modeling of recombination rates combining meiotic and historical estimates
+#+NAME: fig:fampopresid
+#+RESULTS[095b55877a4ab64a76066d201a210e447e6b7806]:
+[[file:figures/pedpop_residuals.png]]
+
+ We can see clear outliers from the expected standard Gaussian
+ distribution, which we now extract
+
+#+BEGIN_SRC R :session hdrecmap :tangle "code/hdrecmap.R" :exports both :results output latex 
+  require(qvalue)
+  require(xtable)
+
+  pred.wide$resid=as.double(str.resid.pop)
+  pred.wide$regresid=as.double(residuals(linmod))
+
+  pred.wide$quantile=pnorm(qqnorm(pred.wide$family,plot.it=F)$x)
+  ## compute values from 
+  pred.wide$pval.hi=as.vector(pnorm(pred.wide$resid,lower.tail=F))
+  pred.wide$pval.lo=as.vector(pnorm(pred.wide$resid))
+
+  pval=2*pnorm(abs(pred.wide$resid),lower.tail=F)
+  pred.wide$pval2side=as.double(pval)
+  qval=qvalue(pval,pi0.method='bootstrap')
+
+  fdr.th=max(qval$pvalues[qval$qvalues<0.02])
+
+  zones=subset(pred.wide[pred.wide$pval2side<fdr.th,],
+      select=c(chr,left,right,quantile,regresid,pval2side))
+
+  zones$chr=as.factor(zones$chr)
+  zones$left=zones$left*1e-6
+  zones$right=zones$right*1e-6
+  zones$quantile=round(zones$quantile,digits=3)
+  zones$regresid=round(10^zones$regresid,digits=2)
+  zones$pval2side=format.pval(zones$pval2side,digits=2)
+  colnames(zones)=c('Chromosome','Left (Mbp)',
+              'Right (Mbp)','Meiotic rec. rank','Ratio','p-value')
+
+  print(xtable(zones,
+    caption='Genome regions where meiotic and historical %
+  recombination rates differ significantly.'),include.rownames=FALSE,
+    type='latex',sanitize.text.function=function(x){x})
+
+  write.table(zones,quote=F,row.names=F,file='results/combined/outliers_regions.txt')
+#+END_SRC
+
+#+RESULTS[0366afd84edb9eb255617aaca1ddecf9aafd0758]:
+#+BEGIN_EXPORT latex
+% latex table generated in R 3.3.3 by xtable 1.8-2 package
+% Wed Jun  7 11:21:53 2017
+\begin{table}[ht]
+\centering
+\begin{tabular}{lrrrrl}
+  \hline
+Chromosome & Left (Mbp) & Right (Mbp) & Meiotic rec. rank & Ratio & p-value \\ 
+  \hline
+3 & 103.00 & 104.00 & 0.06 & 0.28 & 1.6e-05 \\ 
+  3 & 109.00 & 110.00 & 0.04 & 0.28 & 1.8e-05 \\ 
+  6 & 36.00 & 37.00 & 0.14 & 0.21 & 1.2e-07 \\ 
+  6 & 37.00 & 38.00 & 0.23 & 0.22 & 1.9e-07 \\ 
+  10 & 29.00 & 30.00 & 0.77 & 0.31 & 8.8e-05 \\ 
+  10 & 36.00 & 37.00 & 0.01 & 0.29 & 2.1e-05 \\ 
+  10 & 42.00 & 43.00 & 0.00 & 0.15 & 4.3e-11 \\ 
+  10 & 43.00 & 44.00 & 0.00 & 0.11 & 1.2e-14 \\ 
+  12 & 4.00 & 5.00 & 0.92 & 3.73 & 7.4e-06 \\ 
+  13 & 63.00 & 64.00 & 0.33 & 0.31 & 5.6e-05 \\ 
+  20 & 28.00 & 29.00 & 0.01 & 3.54 & 1.7e-05 \\ 
+  23 & 10.00 & 11.00 & 0.97 & 3.82 & 5.1e-06 \\ 
+   \hline
+\end{tabular}
+\caption{Genome regions where meiotic and historical %
+recombination rates differ significantly.} 
+\end{table}
+#+END_EXPORT
+
+**** Construction of a high-density recombination map
+
+Based on meiotic recombination rate, we estimate, within each 1Mb
+window the local effective population size. Then, we scale the
+historical recombination rates by this size to get historical
+recombination rates in centiMorgans/Megabase units and produce a high
+density recombination map, in form of a =bim= file with genetic
+distances as third column.
+
+#+BEGIN_SRC R :session hdrecmap :tangle "code/hdrecmap.R" :exports both
+    ## local.Ne estimates log10(4Ne)
+    local.Ne=pred.wide$pop-pred.wide$family
+
+    ## get a global estimate for sub-telomeric regions
+    genome.Ne=median(local.Ne)
+
+    ## gather local.Ne estimates
+    ## For sub-telomeric regions, this is set to genome.Ne
+    mypop=pop[pop$rep==0,c(1,2,3)]
+    mypop$seg=paste(mypop$chr,mypop$left,mypop$right,sep='-')
+    mypop$scale=genome.Ne
+    mypop$scale[match(pred.wide$seg,mypop$seg)]=local.Ne
+
+    colnames(mypop)[5]='scale (log10(4Ne))'
+    write.table(mypop[,c(1,2,3,5)],row.names=F,quote=F,
+                file='results/combined/pop_scale.txt')
+
+    ## Scale our map
+    popscale=read.table('results/combined/pop_scale.txt',skip=1)
+
+    pop.hd=read.table('results/population/HD_SNP_array_map.txt',h=T)
+
+    scale.delta=function(seg,scale=popscale) {
+        idx=NULL
+        seg=unlist(seg)
+        idx=which((popscale[,1]==seg[1])&(popscale[,2]<=seg[2])&(popscale[,3]>=seg[3]))
+        if (length(idx)<1) {
+            idx=max(which((popscale[,1]==seg[1])&(popscale[,2]<=seg[2])))
+            return(popscale[idx,4])
+        } else {
+            return(popscale[idx,4])
+        }
+    }
+
+    tt=unlist(apply(pop.hd,1,scale.delta))
+
+    pop.hd$scale=tt
+    pop.hd$d=100*pop.hd$delta*10^-pop.hd$scale ## in cM
+    pop.hd$c=1e6*pop.hd$d/(pop.hd$right-pop.hd$left) ## in cM/Mb
+    pop.hd$rho=1e3*pop.hd$delta/(pop.hd$right-pop.hd$left) ## per Kb
+
+  write.table(pop.hd,quote=F,row.names=F,
+              file='results/combined/HD_SNP_array_map_scaled.txt')
+
+  ## Now create a bim file with genetic distances, 
+  ## using linear approximation for markers
+  ## snps object contains original bim file data
+
+    for (chrom in 1:26) {
+        mysnps=snps$chr==chrom
+        mymap=pop.hd$chr==chrom
+        myd=c(0,cumsum(pop.hd$d[mymap]))
+        myp=c(pop.hd$left[mymap][1],pop.hd$right[mymap])
+        ff=approxfun(myp,myd,rule=2)
+        snps$gen[mysnps]=round(ff(snps$pos[mysnps]),digits=3)
+    }
+
+  write.table(snps,quote=F,row.names=F,
+              file='results/combined/Illumina_Ovine_HD.bim')
+#+END_SRC
+
+#+RESULTS[541f17cf591fdc33d10efa3387a99372c9ec900b]:
+
+*** Comparison of Recombination maps in Soay and Lacaune
+
+
+**** Comparison to new Soay maps
+
+We downloaded Soay data from Johnston et al. (2016) from the dryad
+repository. Specifically we used the files named: 
+- =20150129merged1_66nodups.QC2.{bed,bim,fam}=
+- =2_FamilyPedigree_FullClean_g.txt=
+
+Specifically we kept all individuals from the file
+ =20150129merged1_66nodups.QC2.{bed,bim,fam}=
+that are listed in the file =2_FamilyPedigree_FullClean_g.txt= (column
+ ANIMAL). 
+
+We constructed integer identifiers for each individual
+(=code/soay_renumfam.py=). The file =data/Soay/keep_indivs.txt= contains
+animals from =2_FamilyPedigree_FullClean_g.txt= with their ids changed
+from their original IDs to linkphase integers (see R script
+=code/soay_getindiv2keep.R=).
+
+We then ran LINKPHASE on the Soay data:
+
+#+BEGIN_SRC sh 
+  ./code/soay_prepare_linkphase.sh
+  ./code/soay_run_linkphase.sh
+#+END_SRC
+
+
+Finally, we can select focal individuals (FIDs) from the Soay data,
+using the same script used for the Lacaune given in
+=code/selectFIDs.R=. A first run of the estimation procedure revealed
+that one individual had a very high number of crossovers (~100) per
+meioses (RE4844) so we discarded it by commenting it out in the
+=data/Soay/FIDs.txt= file. Soay recombination maps can be estimated
+using
+
+#+BEGIN_SRC sh
+python code/soay_family_map.py
+#+END_SRC
+
+
+#+header: :width 10 :height 5 :units in :res 200
+#+BEGIN_SRC R :exports both :results output graphics :file figures/precisions_lac_soay.png
+  lac=read.table('results/family/SNP_array_map.txt',h=T)
+  soay=read.table('results/Soay/SNP_array_map.txt',h=T)
+  ## intervals where average rec. rate is less than 1cM/Mb
+  sub=0.5*(soay$m_cj+lac$m_cj)<1.5
+
+  library(RColorBrewer)
+
+  coul=brewer.pal(4,'Set1')
+  par(mfrow=c(1,2),mar=c(5,5,1,1))
+  ## Comparison of rec. rates
+  ss.rate=lowess(log10(soay$m_cj),log10(lac$m_cj),f=0.05)
+  plot(y=log10(soay$m_cj),x=log10(lac$m_cj),pch=16,col=coul[2],
+       xlim=c(-1,1),
+       ylim=c(-1,1),
+       xlab='Lacaune rec. rate (cM/Mb)',
+       ylab='Soay rec. rate (cM/Mb)',axes=F)
+  points(y=log10(soay$m_cj[sub]),x=log10(lac$m_cj[sub]),pch=16,col='gray')
+  lines(x=ss.rate$y,y=ss.rate$x,col=coul[1],lwd=4)
+  abline(0,1,col=coul[3],lwd=3,lty=2)
+  axis(1,at=log10(c(0.1,0.2,0.5,1,2,5,10)),labels=c(0.1,0.2,0.5,1,2,5,10))
+  axis(2,at=log10(c(0.1,0.2,0.5,1,2,5,10)),labels=c(0.1,0.2,0.5,1,2,5,10))
+  ## Comparison of precisions
+  #plot(log10(lac$m_cj),(soay$s_cj/lac$s_cj)^2,pch=16,col=coul[2],
+  plot(log10(0.5*(lac$m_cj+soay$m_cj)),(soay$s_cj/lac$s_cj)^2,pch=16,col=coul[2],
+       xlim=c(-1,1),ylim=c(0,9),
+       xlab='Average rec. rate (cM/Mb)',
+       ##     ylab=expression(sigma[Soay]^2/sigma[Lacaune]^2),
+       ylab='Posterior Variance Ratio (Soay/Lacaune)',
+       axes=FALSE)
+  axis(1,at=log10(c(0.1,0.2,0.5,1,2,5,10)),labels=c(0.1,0.2,0.5,1,2,5,10))
+  axis(2,at=c(0,1,2,4,6,8))
+  #points(log10(lac$m_cj[sub]),(soay$s_cj[sub]/lac$s_cj[sub])^2,pch=16,col='gray')
+  points(log10(0.5*(lac$m_cj+soay$m_cj)[sub]),(soay$s_cj[sub]/lac$s_cj[sub])^2,pch=16,col='gray')
+  ss.prec=lowess(log10(lac$m_cj),(soay$s_cj/lac$s_cj)^2,f=0.05)
+  lines(ss.prec,col=coul[1],lwd=4)
+  abline(h=1,lwd=3,lty=2,col=coul[3])
+
+#+END_SRC
+#+CAPTION: Comparison of recombination rates in Lacaune and Soay males on the SNP array.
+#+RESULTS:
+[[file:figures/precisions_lac_soay.png]]
+
+**** Combining datasets to create new recombination maps
+
+Given that the two populations exhibit similar recombination maps, we
+combined the datasets by considering crossovers detected in both
+populations to establish new recombination maps. 
+
+#+BEGIN_SRC sh 
+python code/soay_lacaune_family_map.py 
+#+END_SRC
+
+This creates two new recombination maps at the one megabase scale (
+=results/family/soay_lacaune_1Mb_map.txt= ) and at on the SNP array (
+=results/family/soay_lacaune_SNP_array_map.txt= ).
+
+We can illustrate the gain in precision from these maps by looking at
+the distribution of posterior standard deviations of recombination
+rates
+
+#+header: :width 10 :height 5 :units in :res 200
+#+BEGIN_SRC R :exports results :results output graphics :file figures/post_sd_lac_soay.png
+
+  sheep=read.table('results/family/soay_lacaune_1Mb_map.txt',h=T)
+  lac=read.table('results/family/1Mb_map.txt',h=T)
+  soay=read.table('results/Soay/1Mb_map.txt',h=T)
+
+  par (mfrow=c(1,2))
+  plot(density(sheep$s_cj,bw=0.02),lwd=3,xlim=c(0,0.5),xlab='Posterior SD',axes=F,main='1Mb Intervals',col='purple')
+  lines(density(lac$s_cj,bw=0.02),lwd=3,col=4)
+  lines(density(soay$s_cj,bw=0.02),lwd=3,col=2)
+  axis(1)
+  axis(2)
+  legend(0.3,10,col=c(2,4,'purple'),lty=1,legend=c('Soay','Lacaune','Both'),bty='n',lwd=3)
+
+  sheep=read.table('results/family/soay_lacaune_SNP_array_map.txt',h=T)
+  lac=read.table('results/family/SNP_array_map.txt',h=T)
+  soay=read.table('results/Soay/SNP_array_map.txt',h=T)
+
+  plot(density(sheep$s_cj,bw=0.02),lwd=3,xlab='Posterior SD',axes=F,
+       xlim=c(0,1.75),ylim=c(0,4),
+       main='SNP array Intervals',col='purple')
+  lines(density(lac$s_cj,bw=0.02),lwd=3,col=4)
+  lines(density(soay$s_cj,bw=0.02),lwd=3,col=2)
+  axis(1)
+  axis(2)
+  legend(1.2,4,col=c(2,4,'purple'),lty=1,
+         legend=c('Soay','Lacaune','Both'),bty='n',lwd=3)
+
+#+END_SRC
+
+#+RESULTS:
+[[file:figures/post_sd_lac_soay.png]]
+
+
+** Genetic Determinism of Genome-wide recombination Rate in Lacaune Sheep
+*** Covariate effects on GRR
+For each sire selected in our FID list, we first extract for each of
+its offpring, its year of birth and insemination date of the ewe,
+gathering data from LINKPHASE output and in the
+=data/family/sheep_covariates.txt= file. This is done by running the
+=code/list_meioses.py=.
+#+BEGIN_SRC sh :tangle "code/run_scripts.sh" 
+python code/list_meioses.py
+#+END_SRC
+This creates the file =results/family/nco_meioses.txt=. 
+#+BEGIN_SRC R :session grr :tangle "code/grr.R" :exports both :results output
+  grr=read.table('results/family/nco_meioses.txt')
+  colnames(grr)=c('offspring','sire','year','insem','nco')
+  grr$insem.mo=with(grr,month.abb[insem])
+  grr$insem.mo=ordered(grr$insem.mo,levels=month.abb)
+  grr$sire=as.factor(grr$sire)
+  grr$year=as.factor(grr$year)
+  grr$offspring=as.factor(grr$offspring)
+  head(grr)
+#+END_SRC 
+
+#+RESULTS[dae900f31dc075cb03de53f4d257bf9d9123919a]:
+:   offspring sire year insem nco insem.mo
+: 1     10006 3923 2004     3  38      Mar
+: 2      9267 3923 2004     6  35      Jun
+: 3     10146 3923 2004     3  33      Mar
+: 4     10149 3923 2004     4  30      Apr
+: 5     10733 3923 2004     5  31      May
+: 6      9677 3923 2004     6  28      Jun
+
+
+Using this file, we can test for Year-of-birth and Insemination month
+effects.
+
+#+BEGIN_SRC R :session grr :tangle "code/grr.R"  :results output latex
+  library(lme4)
+
+  grr=grr[complete.cases(grr$year)&complete.cases(grr$insem),]
+
+  mod.null=lmer(nco ~ (1|sire),data=grr,REML=FALSE)
+
+  mod.year=lmer(nco ~ (1|sire)+year,data=grr,REML=FALSE)
+  ## No Year of birth effect
+  anova(mod.null,mod.year)
+  ## A small insemination month effect
+  mod.insem=lmer(nco ~ (1|sire)+insem.mo-1,data=grr,REML=FALSE)
+  ci=confint(mod.insem)[-c(1,2),]
+
+  anova(mod.null,mod.insem)
+#+END_SRC
+
+#+RESULTS[2146ec05422bd351581c9553afe0f8a4c93654a6]:
+#+BEGIN_EXPORT latex
+Data: grr
+Models:
+mod.null: nco ~ (1 | sire)
+mod.year: nco ~ (1 | sire) + year
+         Df   AIC   BIC logLik deviance  Chisq Chi Df Pr(>Chisq)
+mod.null  3 35791 35811 -17893    35785                         
+mod.year 16 35804 35911 -17886    35772 13.505     13     0.4096
+Computing profile confidence intervals ...
+Data: grr
+Models:
+mod.null: nco ~ (1 | sire)
+mod.insem: nco ~ (1 | sire) + insem.mo - 1
+          Df   AIC   BIC logLik deviance  Chisq Chi Df Pr(>Chisq)   
+mod.null   3 35791 35811 -17893    35785                            
+mod.insem  9 35781 35841 -17882    35763 21.832      6   0.001299 **
+---
+Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+#+END_EXPORT
+
+
+This significant effect seems mostly due to slightly increased
+recombination in May.
+
+#+HEADER: :width 5 :height 7 :units in :res 200
+#+BEGIN_SRC R :session grr :tangle "code/grr.R" :exports both :results output graphics :file "figures/grr_insem_month.png" 
+  ## fit using REML
+  mod.insem.reml=update(mod.insem,REML=TRUE)
+  ci=confint(mod.insem.reml)[-c(1,2),]
+  layout(matrix(c(1,1,1,1,2,2),ncol=2,byrow=T))
+  plot(2:8,fixef(mod.insem.reml),axes=F,pch=19,
+       ylab='Mean number of Crossovers / meiosis',
+       xlab='Insemination Month',
+       type='b',lty=2,lwd=2,
+       ylim=c(33,38.5),cex=2)
+  axis(1,at=2:8,labels=month.abb[2:8],las=2)
+  axis(2) 
+  head(ci)
+  segments(x0=2:8,x1=2:8,y0=ci[,1],y1=ci[,2],lwd=2)
+  barplot(table(grr$insem.mo)[2:8],ylab='Number of Inseminations')
+#+END_SRC
+#+CAPTION: Effect of insemination month on genome-wide recombination rate. Top: average and 95% confidence intervals. Bottom: number of observation per month.
+#+NAME: fig:insemination
+#+ATTR_LATEX: :width 0.5\textwidth :placement [H]
+#+RESULTS[ab81434ce143926331db7a848390636a36894268]:
+[[file:figures/grr_insem_month.png]]
+*** Genetic parameters of GRR in the Lacaune population
+ 
+To esimate genetic parameters of the genowide recombination rate (GRR)
+phenotype in the Lacaune population, we fit an additive genetic model, with
+covariance between individuals estimated from their pedigree going
+back 4 generations (file =data/family/lacaune_pedigree_4G.txt=). We
+use the =bluf90= suite, specifically =renumf90= to create input files
+for =airemlf90= that is used for esimating genetic parameters and
+additive genetic values. This analysis is run using the
+=code/run_aireml.py= script:
+
+#+BEGIN_SRC sh :tangle code/run_scripts.sh
+python code/run_aireml.py
+#+END_SRC
+
+Then we extract the predicted additive genetic values (BLUP) of each
+of the 345 sires.  A comparison of BLUP to the mean number of
+crossover per meiosis illustrates nicely the difference between
+independant animal effects and genetic values, in particular
+shrinkage (notive how BLUPs are shrinked toward 0 compared to the
+least squares estimates).
+
+#+BEGIN_SRC R :session grr :tangle "code/grr.R" :exports both :results output graphics :file "figures/blup_Ri.png" 
+  parec=read.table('results/family/parent_recombination.txt',h=T)
+  sol=read.table('results/family/solutions.aireml',skip=1)
+  ## overall mean
+  mu=sol[1,4]
+  ## Sire effects
+  blup=sol[sol$V2==4,]
+  ## Correspondance between levels and sires
+  corresp.ped=read.table('results/family/renadd04.ped')
+
+  parec$id=corresp.ped$V1[match(parec$parent,corresp.ped$V10)]
+  parec$blup=blup$V4[parec$id]
+
+  m=mean(parec$Ri)
+  plot(parec$Ri-m,parec$blup,
+       xlab='Mean number of Crossovers per meiosis',
+       ylab='Additive Genetic Value (BLUP)',pch=19,axes=F)
+  axis(1,at=axTicks(1),labels=round(axTicks(1)+m,digits=1))
+  abline(0,1,lwd=2,col=2)
+  axis(2)
+
+  write.table(parec,file='results/family/parent_recombination_blup.txt',quote=F,row.names=F)
+#+END_SRC
+
+#+RESULTS[4f2e8a615634cc6d3f3faa350056d1a829022557]:
+[[file:figures/blup_Ri.png]]
+
+*** Genome-wide association study identifies two major loci affecting GRR in Lacaune sheep
+
+**** Imputation
+
+We use bimbam for imputation of genotypes. The script to convert plink
+files to bimbam input is provided in =code/gwas_imputation.py=. This
+script will output a file with all bimbam commands to be run for
+imputation, it can be modified to actually run the imputation, but
+that can take a while on a single CPU.
+**** GWAS analysis
+
+We run a genome wide association study on GRR using [[http://www.xzlab.org/software.html][=gemma=]]. GWAS
+input data are provided in the =data/gwas/= directory. The files are:
+- =lacaune.mean.genotypes.txt=: mean genotypes of individuals at all
+  markers, output of the =BIMBAM= imputation run
+- =grr_blup.txt=: individual deviations from the overall
+  mean. Obtained from the AIREML analysis.
+- =snpinfo.txt=: SNP info file.
+
+First, we calculate the genomic relationship matrix between individuals:
+#+BEGIN_SRC bash :cache yes
+  gemma -g data/gwas/lacaune.mean.genotypes.txt \
+        -p data/gwas/grr_blup.txt  \
+        -gk 1 -outdir results/gwas/ -o grr
+#+END_SRC
+
+Then, we run the single SNP GWAS analysis:
+#+BEGIN_SRC bash :exports code :cache yes
+  gemma -g data/gwas/lacaune.mean.genotypes.txt \
+        -p data/gwas/grr_blup.txt  -a data/gwas/snpinfo_gemma.txt \
+        -k results/gwas/grr.cXX.txt\
+        -lmm 4 -o grr -outdir results/gwas/
+#+END_SRC
+
+#+RESULTS:
+| Reading | Files                  | ...            |            |             |                 |        |                     |                 |      |                               |                 |      |                                         |                 |      |                                                   |                 |      |                                                           |
+| ##      | number                 | of             | total      | individuals | =               |    345 |                     |                 |      |                               |                 |      |                                         |                 |      |                                                   |                 |      |                                                           |
+| ##      | number                 | of             | analyzed   | individuals | =               |    345 |                     |                 |      |                               |                 |      |                                         |                 |      |                                                   |                 |      |                                                           |
+| ##      | number                 | of             | covariates | =           | 1               |        |                     |                 |      |                               |                 |      |                                         |                 |      |                                                   |                 |      |                                                           |
+| ##      | number                 | of             | phenotypes | =           | 1               |        |                     |                 |      |                               |                 |      |                                         |                 |      |                                                   |                 |      |                                                           |
+| ##      | number                 | of             | total      | SNPs        | =               | 503784 |                     |                 |      |                               |                 |      |                                         |                 |      |                                                   |                 |      |                                                           |
+| ##      | number                 | of             | analyzed   | SNPs        | =               | 500308 |                     |                 |      |                               |                 |      |                                         |                 |      |                                                   |                 |      |                                                           |
+| Start   | Eigen-Decomposition... |                |            |             |                 |        |                     |                 |      |                               |                 |      |                                         |                 |      |                                                   |                 |      |                                                           |
+| pve     | estimate               | =0.999919      |            |             |                 |        |                     |                 |      |                               |                 |      |                                         |                 |      |                                                   |                 |      |                                                           |
+| se(pve) | =0.00230254            |                |            |             |                 |        |                     |                 |      |                               |                 |      |                                         |                 |      |                                                   |                 |      |                                                           |
+| Reading | SNPs                   | 0.00%Reading | SNPs       | =========   | 19.85%Reading |   SNPs | =================== | 39.70%Reading | SNPs | ============================= | 59.55%Reading | SNPs | ======================================= | 79.40%Reading | SNPs | ================================================= | 99.25%Reading | SNPs | ==================================================100.00% |
+
+
+Now we can estimate a multiQTL model using BSLMM
+#+BEGIN_SRC bash :exports code :cache yes
+  gemma -g data/gwas/lacaune.mean.genotypes.txt \
+        -p data/gwas/grr_blup.txt  -a data/gwas/snpinfo_gemma.txt \
+        -k results/gwas/grr.cXX.txt\
+        -bslmm 1 -o grr_multi -outdir results/gwas/
+
+  gemma -g data/gwas/lacaune.mean.genotypes.txt \
+        -p data/gwas/grr_blup.txt  -a data/gwas/snpinfo_gemma.txt \
+        -k results/gwas/grr.cXX.txt\
+        -bslmm 1 -o grr_multi_10M -s 10000000 -outdir results/gwas/
+#+END_SRC
+
+Read in association results, estimate FDR and local QTL probabilities
+#+BEGIN_SRC R :session gwas 
+  library(ashr)
+  library(zoo)
+
+  ### LMM results
+  assoc=read.table('results/gwas/grr.assoc.txt',h=T)
+  ash.grr=ash(assoc$beta,assoc$se)
+
+  ### BSLMM results
+  gam=read.table('results/gwas/grr_multi_10M.param.txt',h=T)
+  ksnp=50
+  gam$locgamma=rollsum(gam$gamma,k=ksnp,fill=NA)
+#+END_SRC
+
+An examine likely QTLS:
+
+#+header: :width 10 :height 8 :units in :res 200
+#+BEGIN_SRC R :session gwas :exports results :results output graphics :file figures/gwas-lacaune.png
+
+  coul=c('black','gray50')
+  th5=max(assoc$p_wald[ash.grr$result$qvalue<0.1])
+
+  par(mar=c(1,5,4,1),mfrow=c(2,1))
+  plot(-log10(assoc$p_wald),col=coul[(assoc$chr%%2)+1],pch='.',
+         cex=3,axes=F,xlab='',ylab='-log(p)')
+  axis(2)
+  abline(h=-log10(th5),lwd=2,lty=2)
+  plot(gam$locgamma,col=coul[(gam$chr%%2)+1],
+       xlab='',ylab=expression(paste("P( ", gamma," = 1)")),
+       pch='.',cex=4,axes=F)
+  axis(2)
+  abline(h=0.10)
+
+  ## candidate regions based on gamma
+  gam[!is.na(gam$locgamma) & (gam$locgamma>0.1),-c(4,5)]
+
+  ## candidate regions based on p-values
+  assoc[ash.grr$result$qvalue < 0.1,c(1,2,3,12)]
+#+END_SRC
+
+#+RESULTS:
+[[file:figures/gwas-lacaune.png]]
+
+*** Association with RNF212
+The genotype of 266 individuals at four mutations in RNF212 are given
+in file =data/gwas/rnf212mut.{bed,bim.fam}. As we only have genotypes
+at 266 individuals that we need to extract from the mean genotype file
+to calculate their genomic relationships.
+#+BEGIN_SRC R :exports code
+  fam=read.table('data/gwas/rnf212mut.fam')
+  gwas.indiv=scan('data/gwas/individuals.txt',what='character')
+  mgw=read.table('data/gwas/lacaune.mean.genotypes.txt')
+
+  rnf212.indiv=match(fam$V2,gwas.indiv)
+  rnf212.mgw=mgw[,c(1,2,3,3+rnf212.indiv)]
+  write.table(rnf212.mgw,quote=F,row.names=F,col.names=F,'data/gwas/rnf212.indivs.mean.genotypes.txt')
+
+  blup=scan('data/gwas/grr_blup.txt')
+  rnf212.blup=blup[rnf212.indiv]
+
+  write.table(rnf212.blup,quote=F,row.names=F,col.names=F,file='data/gwas/rnf212.blup')
+#+END_SRC
+
+We can then run gemma on the subset of individuals and test for
+association of RNF212 mutations
+#+BEGIN_SRC sh :cache yes
+  gemma -g data/gwas/rnf212.indivs.mean.genotypes.txt \
+        -p data/gwas/rnf212.blup \
+        -gk 1 -outdir data/gwas/ -o rnf212
+
+  gemma -bfile data/gwas/rnf212mut \
+        -p data/gwas/rnf212.blup  \
+        -k data/gwas/rnf212.cXX.txt\
+        -lmm 4 -o rnf212 -outdir results/gwas/
+#+END_SRC
+
+#+RESULTS:
+| Reading     | Files                  | ...            |            |                                                           |                 |        |                    |                 |      |                              |                 |      |                                       |                 |      |                                                |                 |      |                                                           |
+| ##          | number                 | of             | total      | individuals                                               | =               |    266 |                    |                 |      |                              |                 |      |                                       |                 |      |                                                |                 |      |                                                           |
+| ##          | number                 | of             | analyzed   | individuals                                               | =               |    266 |                    |                 |      |                              |                 |      |                                       |                 |      |                                                |                 |      |                                                           |
+| ##          | number                 | of             | covariates | =                                                         | 1               |        |                    |                 |      |                              |                 |      |                                       |                 |      |                                                |                 |      |                                                           |
+| ##          | number                 | of             | phenotypes | =                                                         | 1               |        |                    |                 |      |                              |                 |      |                                       |                 |      |                                                |                 |      |                                                           |
+| ##          | number                 | of             | total      | SNPs                                                      | =               | 534677 |                    |                 |      |                              |                 |      |                                       |                 |      |                                                |                 |      |                                                           |
+| ##          | number                 | of             | analyzed   | SNPs                                                      | =               | 522594 |                    |                 |      |                              |                 |      |                                       |                 |      |                                                |                 |      |                                                           |
+| Calculating | Relatedness            | Matrix         | ...        |                                                           |                 |        |                    |                 |      |                              |                 |      |                                       |                 |      |                                                |                 |      |                                                           |
+| Reading     | SNPs                   | 0.00%Reading | SNPs       | =========                                                 | 18.70%Reading |   SNPs | ================== | 37.41%Reading | SNPs | ============================ | 56.11%Reading | SNPs | ===================================== | 74.81%Reading | SNPs | ============================================== | 93.51%Reading | SNPs | ==================================================100.00% |
+| Reading     | Files                  | ...            |            |                                                           |                 |        |                    |                 |      |                              |                 |      |                                       |                 |      |                                                |                 |      |                                                           |
+| ##          | number                 | of             | total      | individuals                                               | =               |    266 |                    |                 |      |                              |                 |      |                                       |                 |      |                                                |                 |      |                                                           |
+| ##          | number                 | of             | analyzed   | individuals                                               | =               |    266 |                    |                 |      |                              |                 |      |                                       |                 |      |                                                |                 |      |                                                           |
+| ##          | number                 | of             | covariates | =                                                         | 1               |        |                    |                 |      |                              |                 |      |                                       |                 |      |                                                |                 |      |                                                           |
+| ##          | number                 | of             | phenotypes | =                                                         | 1               |        |                    |                 |      |                              |                 |      |                                       |                 |      |                                                |                 |      |                                                           |
+| ##          | number                 | of             | total      | SNPs                                                      | =               |      4 |                    |                 |      |                              |                 |      |                                       |                 |      |                                                |                 |      |                                                           |
+| ##          | number                 | of             | analyzed   | SNPs                                                      | =               |      4 |                    |                 |      |                              |                 |      |                                       |                 |      |                                                |                 |      |                                                           |
+| Start       | Eigen-Decomposition... |                |            |                                                           |                 |        |                    |                 |      |                              |                 |      |                                       |                 |      |                                                |                 |      |                                                           |
+| pve         | estimate               | =0.999922      |            |                                                           |                 |        |                    |                 |      |                              |                 |      |                                       |                 |      |                                                |                 |      |                                                           |
+| se(pve)     | =0.00244036            |                |            |                                                           |                 |        |                    |                 |      |                              |                 |      |                                       |                 |      |                                                |                 |      |                                                           |
+| Reading     | SNPs                   | 0.00%Reading | SNPs       | ==================================================100.00% |                 |        |                    |                 |      |                              |                 |      |                                       |                 |      |                                                |                 |      |                                                           |
+
+We can also impute all individuals for the RNF212 mutations with
+bimbam: 
+
+#+BEGIN_SRC sh :tangle code/rnf212_imputation.sh :cache yes
+  ## exctract the end of OAR6
+  plink --sheep --bfile data/gwas/FinalCohort --chr 6 --from-kb 115000 \
+        --out data/gwas/cohort-chr6qtl --make-bed
+  plink --sheep --bfile data/gwas/cohort-chr6qtl --bmerge data/gwas/rnf212mut \
+        --make-bed --out data/gwas/cohort-chr6qtl-mut
+
+  ## get panel
+  plink --sheep --family --bfile data/population/HDpanel/frenchsheep_HD \
+    --keep-cluster-names LAC LAM \
+    --chr 6 --from-kb 115 \
+    --out data/gwas/panel-chr6qtl-mut --recode-bimbam
+
+  ## Recode bimbam
+  plink --sheep --bfile data/gwas/cohort-chr6qtl-mut --chr 6 \
+        --recode-bimbam --out data/gwas/cohort-chr6qtl-mut
+
+  ## Run bimbam
+  bimbam -g data/gwas/panel-chr6qtl-mut.recode.geno.txt -p 0 \
+         -pos data/gwas/panel-chr6qtl-mut.recode.pos.txt \
+         -g data/gwas/cohort-chr6qtl-mut.recode.geno.txt \
+         -p data/gwas/cohort-chr6qtl-mut.recode.pheno.txt\
+         -pos data/gwas/cohort-chr6qtl-mut.recode.pos.txt  \
+         -e 10 -w 20 -s 1 -c 15 -o imput_rnf212 -wmg 
+
+  mv output/imput_rnf212.mean.genotype.txt data/gwas/
+  awk '{print $1, $6 ,$5}' output/imput_rnf212.snpinfo.txt  | sed -e s/0$/6/g >data/gwas/imput_rnf212.snpinfo.txt
+
+
+#+END_SRC
+and then perform a local GWAS analysis with gemma:
+
+#+BEGIN_SRC sh
+  gemma -g data/gwas/imput_rnf212.mean.genotype.txt \
+        -p data/gwas/grr_blup.txt \
+        -k results/gwas/grr.cXX.txt \
+        -a data/gwas/imput_rnf212.snpinfo.txt \
+        -lmm 4 -o rnf212 -outdir results/gwas/
+
+
+  gemma -g data/gwas/imput_rnf212.mean.genotype.txt \
+        -p data/gwas/grr_blup.txt \
+        -k results/gwas/grr.cXX.txt \
+        -a data/gwas/imput_rnf212.snpinfo.txt -bslmm 1 -o rnf212_multi -outdir results/gwas/
+#+END_SRC
+
+The top SNP is a mutation within the RNF212 gene:
+
+#+HEADER: :height 5 :width 5 :units in :res 200
+#+BEGIN_SRC R :session rnf :tangle code/rnf212.R :exports results :results output graphics :file figures/rnf212_assoc.png
+  rnf212=read.table('results/gwas/rnf212.assoc.txt',h=TRUE)
+  pred.pos=c(116426000,116448000)
+    mut=sapply(rnf212$rs,function(x){substr(x,start=1,stop=3)})=='RNF'
+  plot(rnf212$ps,-log10(rnf212$p_wald),
+       xlim=c(116.2e6,117e6),
+       xlab='Position (Mb)',
+       ylab='-log(p)',
+       axes=FALSE,col=0)
+  polygon(x=c(pred.pos,rev(pred.pos)),y=c(0,0,16,16),col='gray',border='gray')
+  points(rnf212$ps,-log10(rnf212$p_wald),pch=16,col=1)
+  points(rnf212$ps[mut],-log10(rnf212$p_wald[mut]),pch=19,col=2)
+  axis(1,at=seq(116.2e6,117e6,1e5),labels=seq(116.2,117,0.1))
+  axis(2)
+#+END_SRC
+#+CAPTION: Association in the distal end of chromosome 6
+#+RESULTS:
+[[file:figures/rnf212_assoc.png]]
+
+Get Soay association data in the region
+#+BEGIN_SRC sh
+curl http://www.genetics.org/content/genetics/suppl/2016/03/29/genetics.115.185553.DC1/TableS6.txt > data/Soay/assoc_oar6.txt
+#+END_SRC
+
+#+RESULTS:
+And we can compare the association results between the two populations
+
+#+HEADER: :width 5 :height 8 :units in :res 300
+#+BEGIN_SRC R :session rnf :tangle code/rnf212.R :exports results :results output graphics :file figures/rnf212_assoc_soay.png
+  assoc.soay=read.table('data/Soay/assoc_oar6.txt',h=T,sep=',')
+  colnames(assoc.soay)
+
+  assoc.soay.m=subset(assoc.soay,Model=='Male')
+  assoc.soay.f=subset(assoc.soay,Model=='Female')
+  assoc.soay.a=subset(assoc.soay,Model=='All')
+
+  head(rnf212)
+
+  layout(matrix(c(1,1,2,3),nrow=4))
+
+  pred.pos=c(116426000,116448000)
+  plot(rnf212$ps,-log10(rnf212$p_wald),
+         xlim=c(115.8e6,117e6),
+         xlab='Position (Mb)',
+         ylab='-log(p)',main='Lacaune GWAS (Males)',
+       axes=FALSE,col=0)
+  ## RNF 212 gene
+  polygon(x=c(pred.pos,rev(pred.pos)),y=c(0,0,16,16),col='gray',border='gray')
+  points(rnf212$ps,-log10(rnf212$p_wald),pch=16,col='gray')
+  ## Common markers with Soay
+  common=rnf212$ps%in%assoc.soay.a$Position
+  points(rnf212$ps[common],-log10(rnf212$p_wald)[common],lwd=2)
+  ## typed mutations
+  points(rnf212$ps[mut],-log10(rnf212$p_wald[mut]),pch=19,col=2)
+  axis(1,at=seq(115.8e6,117e6,2e5),labels=seq(115.8,117,0.2))
+  axis(2)
+
+  plot(assoc.soay.m$Position,-log10(assoc.soay.m$Pr.Chisq.),
+         pch=16,xlim=c(115.8e6,117e6),
+         xlab='Position (Mb)',ylim=c(0,16),
+         ylab='-log(p)',main='Soay GWAS (Males)',col=0,
+       axes=FALSE)
+  ## RNF 212 gene
+  polygon(x=c(pred.pos,rev(pred.pos)),y=c(0,0,16,16),col='gray',border='gray')
+  points(assoc.soay.m$Position,-log10(assoc.soay.m$Pr.Chisq.),col='gray')
+  common=assoc.soay.m$Position%in%rnf212$ps
+  points(assoc.soay.m$Position[common],-log10(assoc.soay.m$Pr.Chisq.)[common],lwd=2)
+  ##points(assoc.soay.m$Position,-log10(assoc.soay.m$Pr.Chisq.),col=4)
+  axis(1,at=seq(115.8e6,117e6,2e5),labels=seq(115.8,117,0.2))
+  axis(2)
+
+  plot(assoc.soay.f$Position,-log10(assoc.soay.f$Pr.Chisq.),
+         pch=16,xlim=c(115.8e6,117e6),
+         xlab='Position (Mb)',
+         ylab='-log(p)',main='Soay GWAS (Females)',col=0,
+       axes=FALSE)
+  ## RNF 212 gene
+  polygon(x=c(pred.pos,rev(pred.pos)),y=c(0,0,16,16),col='gray',border='gray')
+  points(assoc.soay.f$Position,-log10(assoc.soay.f$Pr.Chisq.),col='gray')
+  common=assoc.soay.f$Position%in%rnf212$ps
+  points(assoc.soay.f$Position[common],-log10(assoc.soay.f$Pr.Chisq.)[common],lwd=2)
+  ##points(assoc.soay.m$Position,-log10(assoc.soay.m$Pr.Chisq.),col=4)
+  axis(1,at=seq(115.8e6,117e6,2e5),labels=seq(115.8,117,0.2))
+  axis(2)
+  range(assoc.soay.f$Pr.Chisq.[assoc.soay.f$Pr.Chisq.>0])
+#+END_SRC
+#+CAPTION: Comparison of GWAS results in Lacaune and Soay at the distal end of OAR6
+#+RESULTS:
+[[file:figures/rnf212_assoc_soay.png]]
